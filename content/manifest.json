@@ -1,0 +1,43 @@
+{
+  "schema": 3,
+  "package": "mod-native-mounts",
+  "name": "Native Mounts PoC",
+  "version": "0.1.0-account-grant-poc",
+  "description": "Isolated build-12340 Collections page proving native mount-spell dragging and creature preview.",
+  "content": [
+    {
+      "type": "file",
+      "source": "client/Interface/FrameXML/NativeMountsFrame.xml",
+      "target": "Interface/FrameXML/NativeMountsFrame.xml"
+    },
+    {
+      "type": "file",
+      "source": "client/Interface/FrameXML/NativeMountsFrame.lua",
+      "target": "Interface/FrameXML/NativeMountsFrame.lua"
+    }
+  ],
+  "clientFrameXml": {
+    "stockTocSource": "upstream/FrameXML.toc",
+    "stockTocSha256": "3158bea13225ae51137a389f0f3ab8566e94b6be84196dd2c1fda27024677754",
+    "loadEntries": [
+      {
+        "target": "Interface/FrameXML/NativeMountsFrame.xml",
+        "after": "Interface/FrameXML/ContentManagerCollections.lua"
+      }
+    ]
+  },
+  "nativeCollectionPages": [
+    {
+      "id": "mounts",
+      "name": "Mounts",
+      "title": "Mounts (Proof of Concept)",
+      "order": 200,
+      "width": 704,
+      "height": 616,
+      "frame": "NativeMountsCollectionsFrame",
+      "loadTarget": "Interface/FrameXML/NativeMountsFrame.xml",
+      "onShow": "NativeMounts_OpenCollections",
+      "onHide": "NativeMounts_CloseCollections"
+    }
+  ]
+}

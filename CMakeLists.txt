@@ -1,0 +1,11 @@
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountCatalog.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountCatalog.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountEligibility.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountEligibility.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountService.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountService.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountModule.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/mod_native_mounts_loader.cpp")
+AC_ADD_CONFIG_FILE("${CMAKE_CURRENT_LIST_DIR}/conf/mod_native_mounts.conf.dist")
+
+message("-- MOD NATIVE MOUNTS CONFIGURED (account-grant-poc) --")

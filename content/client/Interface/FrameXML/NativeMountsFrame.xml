@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Ui xmlns="http://www.blizzard.com/wow/ui/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+  <Script file="NativeMountsFrame.lua" />
+  <Frame name="NativeMountsCollectionsFrame" parent="ContentManagerCollectionsFrame" hidden="true" enableMouse="true">
+    <Anchors>
+      <Anchor point="TOPLEFT" relativePoint="TOPLEFT"><Offset x="0" y="-32" /></Anchor>
+      <Anchor point="BOTTOMRIGHT" relativePoint="BOTTOMRIGHT"><Offset x="0" y="0" /></Anchor>
+    </Anchors>
+    <Layers>
+      <Layer level="BACKGROUND">
+        <Texture file="Interface\DialogFrame\UI-DialogBox-Background-Dark">
+          <Anchors><Anchor point="TOPLEFT" /><Anchor point="BOTTOMRIGHT" /></Anchors>
+        </Texture>
+      </Layer>
+      <Layer level="ARTWORK">
+        <FontString inherits="GameFontHighlightSmall" text="PoC catalog: click to preview; drag an available spell to a normal action bar.">
+          <Anchors><Anchor point="BOTTOMLEFT"><Offset x="18" y="18" /></Anchor></Anchors>
+        </FontString>
+        <FontString name="NativeMountsSelectedName" inherits="GameFontNormalLarge">
+          <Anchors><Anchor point="TOP" relativePoint="TOP"><Offset x="180" y="-22" /></Anchor></Anchors>
+        </FontString>
+      </Layer>
+    </Layers>
+    <Frames>
+      <PlayerModel name="NativeMountsPreview">
+        <Size x="310" y="390" />
+        <Anchors><Anchor point="TOPRIGHT"><Offset x="-18" y="-54" /></Anchor></Anchors>
+      </PlayerModel>
+    </Frames>
+    <Scripts><OnLoad>NativeMounts_OnLoad(self);</OnLoad></Scripts>
+  </Frame>
+</Ui>
