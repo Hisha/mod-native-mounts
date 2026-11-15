@@ -85,25 +85,75 @@ class CatalogContracts(unittest.TestCase):
         self.assertNotIn("void OnPlayerUpdate(", module)
         self.assertNotIn("ReconcileInterval", module + service + header + config)
         self.assertNotIn("_elapsed", service + header)
-        self.assertIn("PLAYERHOOK_ON_UPDATE_SKILL", module)
-        self.assertIn("PLAYERHOOK_ON_SET_SKILL", module)
-        self.assertIn("PLAYERHOOK_ON_LEVEL_CHANGED", module)
+        for hook in ("PLAYERHOOK_ON_LOGIN", "PLAYERHOOK_ON_BEFORE_LOGOUT",
+                     "PLAYERHOOK_ON_UPDATE_SKILL", "PLAYERHOOK_ON_SET_SKILL",
+                     "PLAYERHOOK_ON_LEVEL_CHANGED"):
+            self.assertNotIn(hook, module)
+        self.assertIn("PLAYERHOOK_ON_LEARN_SPELL", module)
+        self.assertIn("PLAYERHOOK_ON_FORGOT_SPELL", module)
 
-    def test_login_uses_one_batched_state_read(self):
+    def test_collections_uses_one_batched_state_read(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
         load = service[service.index("ReconcileState LoadState"):service.index("bool IsModuleGrant")]
         self.assertEqual(load.count("CharacterDatabase.Query("), 1)
         self.assertIn("UNION ALL SELECT", load)
         self.assertIn("`mount_key` IN ({})", load)
+        reconcile = service[service.index("void Service::ReconcileCollections"):service.index("void Service::HandleLearn")]
+        self.assertIn("LoadState(player, variants)", reconcile)
+        self.assertNotIn("CharacterDatabase.Query(", reconcile)
 
-    def test_acquisition_and_admin_changes_fan_out_by_key(self):
+    def test_acquisition_and_admin_changes_do_not_fan_out(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
         module = (ROOT / "src/NativeMountModule.cpp").read_text()
-        self.assertIn("ReconcileAccountKey(account, variant->key)", service)
-        self.assertIn("ReconcileAccountKey(accountId, mountKey)", service)
-        self.assertIn("ObjectAccessor::FindPlayerByLowGUID", service)
+        self.assertNotIn("ReconcileAccountKey", service)
+        self.assertNotIn("ObjectAccessor", service)
+        learn = service[service.index("void Service::HandleLearn"):service.index("void Service::HandleForget")]
+        self.assertIn("INSERT IGNORE INTO `native_mount_account_ownership`", learn)
+        self.assertNotIn("CharacterDatabase.Query(", learn)
         self.assertIn("native-mounts", module)
         self.assertIn("administratively revoked", module)
+
+    def test_login_population_has_zero_mount_work(self):
+        module = (ROOT / "src/NativeMountModule.cpp").read_text()
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        self.assertNotIn("OnPlayerLogin", module)
+        self.assertNotIn("ReconcileLogin", module + service)
+        # Scaling from one to 1,000 login events cannot invoke module code when
+        # no login callback is registered.
+        self.assertEqual(sum("OnPlayerLogin" in module for _ in range(1000)), 0)
+
+    def test_explicit_versioned_request_reconciles_and_rejects_stale_responses(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        self.assertIn('VERSION .. "\\tSYNC\\t" .. activeRequestId', lua)
+        self.assertIn("ReconcileCollections(player, requestId)", service)
+        self.assertIn("tonumber(request) ~= activeRequestId", lua)
+        self.assertIn('"NMOUNTS\\t1\\tEND\\t" + std::to_string(requestId)', service)
+
+    def test_uncollected_preview_primes_creature_cache_and_clears_stale_model(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        click = lua[lua.index("function NativeMounts_Row_OnClick"):lua.index("function NativeMounts_Row_OnEnter")]
+        self.assertLess(click.index("ClearModel()"), click.index("SetCreature(variant.creature)"))
+        self.assertIn("PrimePreviewCreatureCache(player)", service)
+        self.assertIn("HandleCreatureQueryOpcode(query)", service)
+        self.assertNotIn("learnSpell", click)
+        self.assertNotIn("CastSpell", click)
+
+        data = json.loads((ROOT / "generated/mount_catalog.json").read_text())
+        fixtures = {row["name"]: row["previewCreature"] for row in data["mounts"]
+                    if row["name"] in {"Brown Ram", "White Ram", "Brown Elekk"}}
+        self.assertEqual(set(fixtures), {"Brown Ram", "White Ram", "Brown Elekk"})
+        self.assertTrue(all(fixtures.values()))
+
+    def test_faction_variant_selection_prefers_current_character(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        chooser = lua[lua.index("local function chooseVariant"):lua.index("local function entryOwned")]
+        eligible_known = chooser.index("mountCompanionSlot(variant.spell) then return variant end")
+        eligible = chooser.index("maskHas(variant.races, raceId)", eligible_known + 1)
+        fallback_known = chooser.rindex("mountCompanionSlot(variant.spell) then return variant end")
+        self.assertLess(eligible_known, eligible)
+        self.assertLess(eligible, fallback_known)
 
     def test_collections_refreshes_on_spell_events(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
@@ -135,7 +185,7 @@ class CatalogContracts(unittest.TestCase):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
         self.assertIn("entryOwned(entry)", lua)
         self.assertIn("native_mount_account_ownership", service)
-        self.assertIn("SendOwnershipSnapshot", service)
+        self.assertIn("SendSnapshot(player, owned, requestId)", service)
 
     def test_profession_uses_trained_value(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()

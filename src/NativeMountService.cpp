@@ -5,11 +5,16 @@
 
 #include "DatabaseEnv.h"
 #include "Log.h"
-#include "ObjectAccessor.h"
+#include "ObjectMgr.h"
+#include "Opcodes.h"
 #include "Player.h"
 #include "SharedDefines.h"
 #include "WorldSession.h"
+#include "WorldPacket.h"
 
+#include <algorithm>
+#include <chrono>
+#include <charconv>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -100,23 +105,34 @@ bool IsModuleGrant(GrantState const* grant)
     return grant && grant->introducedByModule && (grant->state == 0 || grant->state == 1);
 }
 
-std::unordered_set<std::string> LoadOwnedKeys(std::uint32_t accountId)
+void PrimePreviewCreatureCache(Player* player)
 {
-    std::unordered_set<std::string> owned;
-    QueryResult rows = CharacterDatabase.Query(
-        "SELECT `mount_key` FROM `native_mount_account_ownership` WHERE `account_id`={} AND `state`=1",
-        accountId);
-    if (rows)
-        do { owned.insert(rows->Fetch()[0].Get<std::string>()); } while (rows->NextRow());
-    return owned;
+    if (!player || !player->GetSession())
+        return;
+    std::unordered_set<std::uint32_t> sent;
+    for (MountVariant const& variant : Catalog())
+    {
+        if (!variant.previewCreatureId || !sent.insert(variant.previewCreatureId).second)
+            continue;
+        if (!sObjectMgr->GetCreatureTemplate(variant.previewCreatureId))
+            continue;
+        // SetCreature resolves through the client's creature-query cache. A
+        // character need not have encountered or learned this creature, so
+        // prime the same authoritative response the normal query handler uses.
+        WorldPacket query(CMSG_CREATURE_QUERY, 12);
+        query << variant.previewCreatureId << ObjectGuid::Empty;
+        player->GetSession()->HandleCreatureQueryOpcode(query);
+    }
 }
 
-void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned)
+void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned,
+    std::uint32_t requestId)
 {
     if (!player)
         return;
-    player->Whisper("NMOUNTS\t1\tRESET", LANG_ADDON, player);
-    std::string payload = "NMOUNTS\t1\tOWN\t";
+    player->Whisper("NMOUNTS\t1\tRESET\t" + std::to_string(requestId), LANG_ADDON, player);
+    std::string const prefix = "NMOUNTS\t1\tOWN\t" + std::to_string(requestId) + "\t";
+    std::string payload = prefix;
     for (MountVariant const& variant : Catalog())
     {
         if (owned.find(std::string(variant.key)) == owned.end())
@@ -125,14 +141,14 @@ void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned)
         if (payload.size() + token.size() + 1 > 240)
         {
             player->Whisper(payload, LANG_ADDON, player);
-            payload = "NMOUNTS\t1\tOWN\t";
+            payload = prefix;
         }
-        if (payload.back() != '\t') payload += ',';
+        if (payload.size() != prefix.size()) payload += ',';
         payload += token;
     }
-    if (payload.back() != '\t')
+    if (payload.size() != prefix.size())
         player->Whisper(payload, LANG_ADDON, player);
-    player->Whisper("NMOUNTS\t1\tEND", LANG_ADDON, player);
+    player->Whisper("NMOUNTS\t1\tEND\t" + std::to_string(requestId), LANG_ADDON, player);
 }
 }
 
@@ -150,6 +166,8 @@ void Service::Configure(ServiceConfig const& config)
 
 bool Service::Initialize()
 {
+    // Force construction of the immutable generated catalog once at startup.
+    std::size_t const catalogSize = Catalog().size();
     QueryResult result = CharacterDatabase.Query(
         "SELECT COUNT(*) FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() "
         "AND `TABLE_NAME` IN ('native_mount_account_ownership','native_mount_character_grant')");
@@ -157,6 +175,8 @@ bool Service::Initialize()
     _databaseAvailable = result && result->Fetch()[0].Get<std::uint64_t>() == 2;
     if (_config.enabled && !_databaseAvailable)
         LOG_ERROR("module.native_mounts", "PoC enabled but native mount ownership/grant tables are missing.");
+    else if (_config.enabled)
+        LOG_INFO("module.native_mounts", "Loaded {} generated mount spell variants at startup.", catalogSize);
     return _databaseAvailable;
 }
 
@@ -171,30 +191,15 @@ std::uint64_t Service::OperationKey(Player const* player, std::uint32_t spellId)
     return (static_cast<std::uint64_t>(player->GetGUID().GetCounter()) << 32U) | spellId;
 }
 
-void Service::Register(Player* player)
+void Service::ReconcileCollections(Player* player, std::uint32_t requestId)
 {
     if (!player || !player->GetSession())
         return;
-    std::lock_guard<std::mutex> lock(_mutex);
-    _onlineByAccount[player->GetSession()->GetAccountId()].insert(player->GetGUID().GetCounter());
-}
-
-void Service::ReconcileLogin(Player* player)
-{
-    if (!player || !player->GetSession() || !IsEnabled())
-        return;
-    Register(player);
+    auto const started = std::chrono::steady_clock::now();
     std::vector<MountVariant const*> variants;
     variants.reserve(Catalog().size());
     for (MountVariant const& variant : Catalog())
         variants.push_back(&variant);
-    Reconcile(player, variants, true);
-}
-
-void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& variants, bool importKnownSpells)
-{
-    if (!player || !player->GetSession() || variants.empty())
-        return;
     bool revokeIneligible = false;
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -205,36 +210,64 @@ void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& 
 
     std::uint32_t const guid = player->GetGUID().GetCounter();
     std::uint32_t const account = player->GetSession()->GetAccountId();
+    auto const queryStarted = std::chrono::steady_clock::now();
     ReconcileState state = LoadState(player, variants);
+    auto const queryElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - queryStarted).count();
     std::vector<std::string> importedKeys;
+    std::vector<MountVariant const*> independentSpells;
+    std::uint32_t grants = 0;
+    std::uint32_t revokes = 0;
 
-    if (importKnownSpells)
+    for (MountVariant const* variant : variants)
     {
-        for (MountVariant const* variant : variants)
+        auto grantIt = state.grants.find(variant->spellId);
+        GrantState const* grant = grantIt == state.grants.end() ? nullptr : &grantIt->second;
+        if (!player->HasSpell(variant->spellId) || IsModuleGrant(grant) ||
+            (grant && grant->state == 3 && !grant->introducedByModule))
+            continue;
+        independentSpells.push_back(variant);
+
+        auto ownershipIt = state.ownership.find(std::string(variant->key));
+        if (ownershipIt == state.ownership.end())
         {
-            auto grantIt = state.grants.find(variant->spellId);
-            GrantState const* grant = grantIt == state.grants.end() ? nullptr : &grantIt->second;
-            if (!player->HasSpell(variant->spellId) || IsModuleGrant(grant))
-                continue;
-
-            auto ownershipIt = state.ownership.find(std::string(variant->key));
-            if (ownershipIt == state.ownership.end())
-            {
-                CharacterDatabase.DirectExecute(
-                    "INSERT IGNORE INTO `native_mount_account_ownership` "
-                    "(`account_id`,`mount_key`,`state`,`first_character_guid`,`first_spell_id`,`acquisition_source`) "
-                    "VALUES ({},'{}',1,{},{},1)", account, variant->key.data(), guid, variant->spellId);
-                state.ownership[std::string(variant->key)] = 1;
-                importedKeys.emplace_back(variant->key);
-            }
-
-            CharacterDatabase.Execute(
-                "INSERT INTO `native_mount_character_grant` "
-                "(`character_guid`,`spell_id`,`mount_key`,`state`,`introduced_by_module`) "
-                "VALUES ({},{},'{}',3,0) ON DUPLICATE KEY UPDATE `mount_key`=VALUES(`mount_key`),"
-                "`state`=3,`introduced_by_module`=0", guid, variant->spellId, variant->key.data());
-            state.grants[variant->spellId] = { 3, false };
+            state.ownership[std::string(variant->key)] = 1;
+            importedKeys.emplace_back(variant->key);
         }
+        state.grants[variant->spellId] = { 3, false };
+    }
+
+    if (!importedKeys.empty())
+    {
+        std::ostringstream sql;
+        sql << "INSERT IGNORE INTO `native_mount_account_ownership` "
+               "(`account_id`,`mount_key`,`state`,`first_character_guid`,`first_spell_id`,`acquisition_source`) VALUES ";
+        bool first = true;
+        for (MountVariant const* variant : independentSpells)
+        {
+            if (std::find(importedKeys.begin(), importedKeys.end(), std::string(variant->key)) == importedKeys.end())
+                continue;
+            if (!first) sql << ',';
+            first = false;
+            sql << '(' << account << ",\'" << variant->key << "\',1," << guid << ','
+                << variant->spellId << ",1)";
+        }
+        CharacterDatabase.DirectExecute(sql.str());
+    }
+    if (!independentSpells.empty())
+    {
+        std::ostringstream sql;
+        sql << "INSERT INTO `native_mount_character_grant` "
+               "(`character_guid`,`spell_id`,`mount_key`,`state`,`introduced_by_module`) VALUES ";
+        bool first = true;
+        for (MountVariant const* variant : independentSpells)
+        {
+            if (!first) sql << ',';
+            first = false;
+            sql << '(' << guid << ',' << variant->spellId << ",\'" << variant->key << "\',3,0)";
+        }
+        sql << " ON DUPLICATE KEY UPDATE `mount_key`=VALUES(`mount_key`),`state`=3,`introduced_by_module`=0";
+        CharacterDatabase.Execute(sql.str());
     }
 
     for (MountVariant const* variant : variants)
@@ -251,6 +284,7 @@ void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& 
             player->HasSpell(variant->spellId), externallySuppressed, moduleGrant, revokeIneligible);
         if (action == ReconcileAction::Grant)
         {
+            ++grants;
             // Provenance commits before learnSpell exposes the grant or invokes
             // OnPlayerLearnSpell.
             CharacterDatabase.DirectExecute(
@@ -275,6 +309,7 @@ void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& 
         }
         else if (action == ReconcileAction::Revoke)
         {
+            ++revokes;
             std::uint64_t const key = OperationKey(player, variant->spellId);
             {
                 std::lock_guard<std::mutex> lock(_mutex);
@@ -291,30 +326,18 @@ void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& 
         }
     }
 
-    // A login import is an ownership change too. Publish it after the current
-    // character's pass so already-online same-account characters are updated.
-    for (std::string const& mountKey : importedKeys)
-        ReconcileAccountKey(account, mountKey);
-    if (!importedKeys.empty())
-        SendOwnershipSnapshot(account);
-}
-
-void Service::HandleLevelChange(Player* player, std::uint8_t oldLevel)
-{
-    if (!player || !IsEnabled())
-        return;
-    Reconcile(player, FindByLevelTransition(oldLevel, player->GetLevel()), false);
-}
-
-void Service::HandleSkillChange(Player* player, std::uint32_t skillId,
-    std::uint32_t oldValue, std::uint32_t newValue)
-{
-    if (!player || oldValue == newValue || !IsEnabled())
-        return;
-    std::vector<MountVariant const*> variants = skillId == SKILL_RIDING
-        ? FindByRidingTransition(oldValue, newValue)
-        : FindByProfessionTransition(skillId, oldValue, newValue);
-    Reconcile(player, variants, false);
+    std::unordered_set<std::string> owned;
+    for (auto const& [key, value] : state.ownership)
+        if (value == 1)
+            owned.insert(key);
+    PrimePreviewCreatureCache(player);
+    SendSnapshot(player, owned, requestId);
+    auto const elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    LOG_INFO("module.native_mounts",
+        "Collections reconciliation account={} character={} request={} db_reads=1 sync_writes={} grants={} revokes={} imports={} query_us={} world_thread_us={}",
+        account, guid, requestId, importedKeys.empty() ? grants : grants + 1,
+        grants, revokes, importedKeys.size(), queryElapsed, elapsed);
 }
 
 void Service::HandleLearn(Player* player, std::uint32_t spellId)
@@ -335,18 +358,13 @@ void Service::HandleLearn(Player* player, std::uint32_t spellId)
     }
 
     std::uint32_t const account = player->GetSession()->GetAccountId();
-    QueryResult ownership = CharacterDatabase.Query(
-        "SELECT `state` FROM `native_mount_account_ownership` WHERE `account_id`={} AND `mount_key`='{}'",
-        account, variant->key.data());
-    bool const newOwnership = !ownership;
-    if (newOwnership)
-    {
-        CharacterDatabase.DirectExecute(
-            "INSERT IGNORE INTO `native_mount_account_ownership` "
-            "(`account_id`,`mount_key`,`state`,`first_character_guid`,`first_spell_id`,`acquisition_source`) "
-            "VALUES ({},'{}',1,{},{},2)", account, variant->key.data(),
-            player->GetGUID().GetCounter(), spellId);
-    }
+    // INSERT IGNORE is both the duplicate check and the write. In particular,
+    // it does not overwrite an administrative-revocation tombstone.
+    CharacterDatabase.Execute(
+        "INSERT IGNORE INTO `native_mount_account_ownership` "
+        "(`account_id`,`mount_key`,`state`,`first_character_guid`,`first_spell_id`,`acquisition_source`) "
+        "VALUES ({},'{}',1,{},{},2)", account, variant->key.data(),
+        player->GetGUID().GetCounter(), spellId);
 
     CharacterDatabase.Execute(
         "INSERT INTO `native_mount_character_grant` "
@@ -354,11 +372,6 @@ void Service::HandleLearn(Player* player, std::uint32_t spellId)
         "VALUES ({},{},'{}',3,0) ON DUPLICATE KEY UPDATE `mount_key`=VALUES(`mount_key`),"
         "`state`=3,`introduced_by_module`=0", player->GetGUID().GetCounter(), spellId, variant->key.data());
 
-    if (newOwnership)
-    {
-        ReconcileAccountKey(account, variant->key);
-        SendOwnershipSnapshot(account);
-    }
 }
 
 void Service::HandleForget(Player* player, std::uint32_t spellId)
@@ -380,9 +393,9 @@ void Service::HandleForget(Player* player, std::uint32_t spellId)
     bool const lostEligibility = Evaluate(*variant, Snapshot(player, *variant)) != EligibilityFailure::None;
     if (IsModuleGrant(grant) && lostEligibility)
     {
-        // SetSkill removes skill-associated spells before its post-change hook.
-        // Classify that core removal as an eligibility revoke, not an external
-        // suppression, so a later skill regain can restore the module grant.
+        // Core can remove skill-associated spells as part of a skill change.
+        // Classify that removal as an eligibility revoke; eligibility is
+        // reevaluated only when Collections is next opened.
         CharacterDatabase.DirectExecute(
             "UPDATE `native_mount_character_grant` SET `state`=2 "
             "WHERE `character_guid`={} AND `spell_id`={}", player->GetGUID().GetCounter(), spellId);
@@ -394,21 +407,6 @@ void Service::HandleForget(Player* player, std::uint32_t spellId)
         "(`character_guid`,`spell_id`,`mount_key`,`state`,`introduced_by_module`) "
         "VALUES ({},{},'{}',4,0) ON DUPLICATE KEY UPDATE `mount_key`=VALUES(`mount_key`),"
         "`state`=4,`introduced_by_module`=0", player->GetGUID().GetCounter(), spellId, variant->key.data());
-}
-
-void Service::ReconcileAccountKey(std::uint32_t accountId, std::string_view mountKey)
-{
-    std::vector<std::uint32_t> guids;
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        auto it = _onlineByAccount.find(accountId);
-        if (it != _onlineByAccount.end())
-            guids.assign(it->second.begin(), it->second.end());
-    }
-    std::vector<MountVariant const*> variants = FindByKey(mountKey);
-    for (std::uint32_t guid : guids)
-        if (Player* online = ObjectAccessor::FindPlayerByLowGUID(guid))
-            Reconcile(online, variants, false);
 }
 
 bool Service::SetAccountOwnership(std::uint32_t accountId, std::string_view mountKey, bool owned)
@@ -423,53 +421,21 @@ bool Service::SetAccountOwnership(std::uint32_t accountId, std::string_view moun
         "VALUES ({},'{}',{},0,{},3) ON DUPLICATE KEY UPDATE `state`=VALUES(`state`),"
         "`acquisition_source`=3", accountId, representative->key.data(), owned ? 1 : 2,
         representative->spellId);
-    ReconcileAccountKey(accountId, mountKey);
-    SendOwnershipSnapshot(accountId);
     return true;
 }
 
 void Service::HandleAddonWhisper(Player* player, std::string_view message)
 {
-    if (!player || !player->GetSession() || !IsEnabled() || message != "NMOUNTS\t1\tSYNC")
+    constexpr std::string_view prefix = "NMOUNTS\t1\tSYNC\t";
+    if (!player || !player->GetSession() || !IsEnabled() || message.rfind(prefix, 0) != 0)
         return;
-    SendOwnershipSnapshot(player);
-}
-
-void Service::SendOwnershipSnapshot(std::uint32_t accountId)
-{
-    std::vector<std::uint32_t> guids;
-    {
-        std::lock_guard<std::mutex> lock(_mutex);
-        auto it = _onlineByAccount.find(accountId);
-        if (it != _onlineByAccount.end())
-            guids.assign(it->second.begin(), it->second.end());
-    }
-    if (guids.empty())
+    std::string_view const value = message.substr(prefix.size());
+    if (value.empty() || value.size() > 10)
         return;
-    std::unordered_set<std::string> const owned = LoadOwnedKeys(accountId);
-    for (std::uint32_t guid : guids)
-        if (Player* player = ObjectAccessor::FindPlayerByLowGUID(guid))
-            SendSnapshot(player, owned);
-}
-
-void Service::SendOwnershipSnapshot(Player* player)
-{
-    if (!player || !player->GetSession())
+    std::uint32_t requestId = 0;
+    auto const parsed = std::from_chars(value.data(), value.data() + value.size(), requestId);
+    if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size() || requestId == 0)
         return;
-    SendSnapshot(player, LoadOwnedKeys(player->GetSession()->GetAccountId()));
-}
-
-void Service::Release(Player* player)
-{
-    if (!player || !player->GetSession())
-        return;
-    std::lock_guard<std::mutex> lock(_mutex);
-    std::uint32_t const account = player->GetSession()->GetAccountId();
-    auto it = _onlineByAccount.find(account);
-    if (it == _onlineByAccount.end())
-        return;
-    it->second.erase(player->GetGUID().GetCounter());
-    if (it->second.empty())
-        _onlineByAccount.erase(it);
+    ReconcileCollections(player, requestId);
 }
 }

@@ -4,6 +4,7 @@ local CATALOG = NATIVE_MOUNT_CATALOG or {}
 local ROWS, ROW_HEIGHT = 9, 54
 local buttons, ownedSpells = {}, {}
 local offset, ownershipReady, selectedSpell = 0, false, nil
+local nextRequestId, activeRequestId = 0, 0
 local raceIds = {Human=1,Orc=2,Dwarf=3,NightElf=4,Scourge=5,Tauren=6,Gnome=7,Troll=8,BloodElf=10,Draenei=11}
 
 local function mountCompanionSlot(spellID)
@@ -19,13 +20,17 @@ local function maskHas(mask, id)
 end
 
 local function chooseVariant(entry)
- for _, variant in ipairs(entry.variants) do
-  if mountCompanionSlot(variant.spell) then return variant end
- end
  local _, raceToken = UnitRace("player"); local _, _, classId = UnitClass("player")
  local raceId = raceIds[raceToken]
  for _, variant in ipairs(entry.variants) do
+  if maskHas(variant.races, raceId) and maskHas(variant.classes, classId) and
+     mountCompanionSlot(variant.spell) then return variant end
+ end
+ for _, variant in ipairs(entry.variants) do
   if maskHas(variant.races, raceId) and maskHas(variant.classes, classId) then return variant end
+ end
+ for _, variant in ipairs(entry.variants) do
+  if mountCompanionSlot(variant.spell) then return variant end
  end
  return entry.variants[1]
 end
@@ -87,6 +92,7 @@ function NativeMounts_Row_OnClick(button)
  if not button.mount then return end
  local variant = chooseVariant(button.mount); button.variant = variant
  selectedSpell = variant.spell
+ NativeMountsPreview:ClearModel()
  if variant.creature and variant.creature > 0 then
   NativeMountsPreview:SetCreature(variant.creature)
   NativeMountsPreview:SetFacing(0); NativeMountsPreview:SetModelScale(1)
@@ -108,14 +114,19 @@ end
 
 local function requestOwnership()
  if SendAddonMessage and UnitName("player") then
-  SendAddonMessage(PREFIX, VERSION .. "\tSYNC", "WHISPER", UnitName("player"))
+  nextRequestId = nextRequestId + 1
+  activeRequestId = nextRequestId
+  ownershipReady = false
+  refreshRows()
+  SendAddonMessage(PREFIX, VERSION .. "\tSYNC\t" .. activeRequestId, "WHISPER", UnitName("player"))
  end
 end
 
 local function handleAddon(prefix, message, channel, sender)
  if prefix ~= PREFIX or channel ~= "WHISPER" or sender ~= UnitName("player") then return end
- local version, operation, body = message:match("^(%d+)\t([^\t]+)\t?(.*)$")
+ local version, operation, request, body = message:match("^(%d+)\t([^\t]+)\t(%d+)\t?(.*)$")
  if version ~= VERSION then return end
+ if tonumber(request) ~= activeRequestId then return end
  if operation == "RESET" then ownedSpells = {}; ownershipReady = false
  elseif operation == "OWN" then
   for value in body:gmatch("%d+") do ownedSpells[tonumber(value)] = true end
