@@ -1,8 +1,7 @@
 [worldserver]
 
-# Isolated account-wide native-spell grant proof of concept.
-# This is deliberately disabled until its SQL migration has been applied and
-# the five-entry catalog has been exercised on a PTR.
+# Account-wide native-spell mount collection. Keep disabled until its SQL
+# migration and generated client package are deployed together and PTR-tested.
 NativeMounts.Poc.Enable = 0
 
 # Remove only a spell whose active ledger row still says it was introduced by

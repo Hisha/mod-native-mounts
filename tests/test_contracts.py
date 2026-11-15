@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class PocContracts(unittest.TestCase):
+class CatalogContracts(unittest.TestCase):
     def test_collection_page_is_independent(self):
         manifest = json.loads((ROOT / "content/manifest.json").read_text())
         self.assertEqual(manifest["nativeCollectionPages"][0]["id"], "mounts")
@@ -25,7 +25,7 @@ class PocContracts(unittest.TestCase):
     def test_drag_payload_is_native_spellbook_action(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         self.assertIn('PickupCompanion("MOUNT", slot)', lua)
-        self.assertIn("local slot = mountCompanionSlot(button.mount.spell)", lua)
+        self.assertIn("mountCompanionSlot(button.variant.spell)", lua)
         self.assertNotIn("PlaceAction", lua)
         self.assertNotIn("PickupSpell", lua)
 
@@ -41,24 +41,24 @@ class PocContracts(unittest.TestCase):
 
     def test_companion_slot_is_resolved_before_native_pickup(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        self.assertIn("local slot = mountCompanionSlot(entry.spell)", lua)
+        self.assertIn("local slot = mountCompanionSlot(variant.spell)", lua)
         self.assertIn("button.companionSlot = slot", lua)
         self.assertLess(lua.index("button.companionSlot = slot"),
                         lua.index('PickupCompanion("MOUNT", slot)'))
 
     def test_restricted_fixtures_are_present(self):
-        catalog = (ROOT / "src/NativeMountCatalog.cpp").read_text()
+        catalog = (ROOT / "generated/NativeMountCatalog.inc").read_text()
         for spell in (58983, 59567, 23161, 44151, 32243):
             self.assertRegex(catalog, rf"\b{spell}\b")
 
     def test_client_catalog_uses_server_spell_ids(self):
-        catalog = (ROOT / "src/NativeMountCatalog.cpp").read_text()
-        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        server_ids = {int(value) for value in re.findall(
-            r'\{\s*"[^"]+",\s*(\d+),', catalog)}
-        client_ids = {int(value) for value in re.findall(r'\{\s*spell=(\d+),', lua)}
+        data = json.loads((ROOT / "generated/mount_catalog.json").read_text())
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountCatalog.lua").read_text()
+        server_ids = {row["spell"] for row in data["mounts"]}
+        client_ids = {int(value) for value in re.findall(r'spell=(\d+),', lua)}
         self.assertEqual(client_ids, server_ids)
         self.assertIn(58983, client_ids)
+        self.assertEqual(lua.count(" {key="), data["statistics"]["logicalMounts"])
 
     def test_only_ledger_rows_are_removed(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
@@ -111,15 +111,36 @@ class PocContracts(unittest.TestCase):
         self.assertIn('RegisterEvent("COMPANION_LEARNED")', lua)
         self.assertIn('RegisterEvent("COMPANION_UNLEARNED")', lua)
         self.assertIn('RegisterEvent("COMPANION_UPDATE")', lua)
-        event_handler = lua[lua.index('frame:SetScript("OnEvent"'):lua.index("for index, entry")]
-        self.assertIn("for _, button in ipairs(buttons) do refreshButton(button) end", event_handler)
-        self.assertNotIn("SendAddonMessage", event_handler)
+        event_handler = lua[lua.index('frame:SetScript("OnEvent"'):lua.index('frame:EnableMouseWheel')]
+        self.assertIn("refreshRows()", event_handler)
 
     def test_client_has_no_periodic_refresh_or_server_query(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         self.assertNotIn('SetScript("OnUpdate"', lua)
         self.assertNotIn("C_Timer", lua)
-        self.assertNotIn("SendAddonMessage", lua)
+        self.assertEqual(lua.count("SendAddonMessage(PREFIX"), 1)
+        self.assertIn('frame:RegisterEvent("CHAT_MSG_ADDON")', lua)
+
+    def test_generated_catalog_is_complete_and_unique(self):
+        data = json.loads((ROOT / "generated/mount_catalog.json").read_text())
+        mounts = data["mounts"]
+        self.assertGreater(len(mounts), 200)
+        self.assertEqual(len({row["spell"] for row in mounts}), len(mounts))
+        self.assertEqual([row["spell"] for row in mounts], sorted(row["spell"] for row in mounts))
+        self.assertEqual(data["statistics"]["acceptedWithoutResolvedMountedAura"], [])
+        self.assertEqual(data["statistics"]["candidateMountedAuraSpells"], 396)
+
+    def test_account_ownership_is_not_inferred_from_spellbook(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        self.assertIn("entryOwned(entry)", lua)
+        self.assertIn("native_mount_account_ownership", service)
+        self.assertIn("SendOwnershipSnapshot", service)
+
+    def test_profession_uses_trained_value(self):
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        self.assertIn("GetPureSkillValue(variant.professionSkill)", service)
+        self.assertNotIn("result.professionRank = player->GetSkillValue", service)
 
 
 if __name__ == "__main__":

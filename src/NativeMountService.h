@@ -33,6 +33,7 @@ public:
         std::uint32_t oldValue, std::uint32_t newValue);
     void HandleLearn(Player* player, std::uint32_t spellId);
     void HandleForget(Player* player, std::uint32_t spellId);
+    void HandleAddonWhisper(Player* player, std::string_view message);
     void Release(Player* player);
     bool SetAccountOwnership(std::uint32_t accountId, std::string_view mountKey, bool owned);
 
@@ -42,6 +43,8 @@ private:
     void Reconcile(Player* player, std::vector<MountVariant const*> const& variants, bool importKnownSpells);
     void ReconcileAccountKey(std::uint32_t accountId, std::string_view mountKey);
     void Register(Player* player);
+    void SendOwnershipSnapshot(Player* player);
+    void SendOwnershipSnapshot(std::uint32_t accountId);
 
     mutable std::mutex _mutex;
     ServiceConfig _config;

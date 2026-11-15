@@ -41,7 +41,9 @@ CharacterEligibility Snapshot(Player const* player, MountVariant const& variant)
     if (variant.professionSkill)
     {
         result.professionSkill = variant.professionSkill;
-        result.professionRank = player->GetSkillValue(variant.professionSkill);
+        // Eligibility is based on trained skill only. Equipment and aura
+        // bonuses must never unlock account-wide profession mounts.
+        result.professionRank = player->GetPureSkillValue(variant.professionSkill);
     }
     return result;
 }
@@ -97,6 +99,41 @@ bool IsModuleGrant(GrantState const* grant)
 {
     return grant && grant->introducedByModule && (grant->state == 0 || grant->state == 1);
 }
+
+std::unordered_set<std::string> LoadOwnedKeys(std::uint32_t accountId)
+{
+    std::unordered_set<std::string> owned;
+    QueryResult rows = CharacterDatabase.Query(
+        "SELECT `mount_key` FROM `native_mount_account_ownership` WHERE `account_id`={} AND `state`=1",
+        accountId);
+    if (rows)
+        do { owned.insert(rows->Fetch()[0].Get<std::string>()); } while (rows->NextRow());
+    return owned;
+}
+
+void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned)
+{
+    if (!player)
+        return;
+    player->Whisper("NMOUNTS\t1\tRESET", LANG_ADDON, player);
+    std::string payload = "NMOUNTS\t1\tOWN\t";
+    for (MountVariant const& variant : Catalog())
+    {
+        if (owned.find(std::string(variant.key)) == owned.end())
+            continue;
+        std::string token = std::to_string(variant.spellId);
+        if (payload.size() + token.size() + 1 > 240)
+        {
+            player->Whisper(payload, LANG_ADDON, player);
+            payload = "NMOUNTS\t1\tOWN\t";
+        }
+        if (payload.back() != '\t') payload += ',';
+        payload += token;
+    }
+    if (payload.back() != '\t')
+        player->Whisper(payload, LANG_ADDON, player);
+    player->Whisper("NMOUNTS\t1\tEND", LANG_ADDON, player);
+}
 }
 
 Service& Service::Instance()
@@ -148,8 +185,8 @@ void Service::ReconcileLogin(Player* player)
         return;
     Register(player);
     std::vector<MountVariant const*> variants;
-    variants.reserve(PocCatalog().size());
-    for (MountVariant const& variant : PocCatalog())
+    variants.reserve(Catalog().size());
+    for (MountVariant const& variant : Catalog())
         variants.push_back(&variant);
     Reconcile(player, variants, true);
 }
@@ -258,6 +295,8 @@ void Service::Reconcile(Player* player, std::vector<MountVariant const*> const& 
     // character's pass so already-online same-account characters are updated.
     for (std::string const& mountKey : importedKeys)
         ReconcileAccountKey(account, mountKey);
+    if (!importedKeys.empty())
+        SendOwnershipSnapshot(account);
 }
 
 void Service::HandleLevelChange(Player* player, std::uint8_t oldLevel)
@@ -316,7 +355,10 @@ void Service::HandleLearn(Player* player, std::uint32_t spellId)
         "`state`=3,`introduced_by_module`=0", player->GetGUID().GetCounter(), spellId, variant->key.data());
 
     if (newOwnership)
+    {
         ReconcileAccountKey(account, variant->key);
+        SendOwnershipSnapshot(account);
+    }
 }
 
 void Service::HandleForget(Player* player, std::uint32_t spellId)
@@ -382,7 +424,39 @@ bool Service::SetAccountOwnership(std::uint32_t accountId, std::string_view moun
         "`acquisition_source`=3", accountId, representative->key.data(), owned ? 1 : 2,
         representative->spellId);
     ReconcileAccountKey(accountId, mountKey);
+    SendOwnershipSnapshot(accountId);
     return true;
+}
+
+void Service::HandleAddonWhisper(Player* player, std::string_view message)
+{
+    if (!player || !player->GetSession() || !IsEnabled() || message != "NMOUNTS\t1\tSYNC")
+        return;
+    SendOwnershipSnapshot(player);
+}
+
+void Service::SendOwnershipSnapshot(std::uint32_t accountId)
+{
+    std::vector<std::uint32_t> guids;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto it = _onlineByAccount.find(accountId);
+        if (it != _onlineByAccount.end())
+            guids.assign(it->second.begin(), it->second.end());
+    }
+    if (guids.empty())
+        return;
+    std::unordered_set<std::string> const owned = LoadOwnedKeys(accountId);
+    for (std::uint32_t guid : guids)
+        if (Player* player = ObjectAccessor::FindPlayerByLowGUID(guid))
+            SendSnapshot(player, owned);
+}
+
+void Service::SendOwnershipSnapshot(Player* player)
+{
+    if (!player || !player->GetSession())
+        return;
+    SendSnapshot(player, LoadOwnedKeys(player->GetSession()->GetAccountId()));
 }
 
 void Service::Release(Player* player)

@@ -8,4 +8,4 @@ AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeMountModule.cpp")
 AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/mod_native_mounts_loader.cpp")
 AC_ADD_CONFIG_FILE("${CMAKE_CURRENT_LIST_DIR}/conf/mod_native_mounts.conf.dist")
 
-message("-- MOD NATIVE MOUNTS CONFIGURED (account-grant-poc) --")
+message("-- MOD NATIVE MOUNTS CONFIGURED (generated account collection) --")

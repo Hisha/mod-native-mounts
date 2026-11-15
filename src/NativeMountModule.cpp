@@ -41,7 +41,9 @@ public:
     NativeMountPlayerScript() : PlayerScript("NativeMountPlayerScript",
         { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LEVEL_CHANGED,
           PLAYERHOOK_ON_LEARN_SPELL, PLAYERHOOK_ON_FORGOT_SPELL, PLAYERHOOK_ON_UPDATE_SKILL,
-          PLAYERHOOK_ON_SET_SKILL }) { }
+          PLAYERHOOK_ON_SET_SKILL, PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT }) { }
+
+    using PlayerScript::OnPlayerCanUseChat;
 
     void OnPlayerLogin(Player* player) override { native_mounts::Service::Instance().ReconcileLogin(player); }
     void OnPlayerBeforeLogout(Player* player) override { native_mounts::Service::Instance().Release(player); }
@@ -66,6 +68,18 @@ public:
         std::uint32_t, std::uint32_t, std::uint32_t newValue) override
     {
         native_mounts::Service::Instance().HandleSkillChange(player, skillId, value, newValue);
+    }
+    bool OnPlayerCanUseChat(Player* player, std::uint32_t type, std::uint32_t language,
+        std::string& message, Player* receiver) override
+    {
+        if (type != CHAT_MSG_WHISPER || language != LANG_ADDON || !player || receiver != player ||
+            message.rfind("NMOUNTS\t", 0) != 0)
+            return true;
+        if (message.rfind("NMOUNTS\t1\tRESET", 0) == 0 || message.rfind("NMOUNTS\t1\tOWN\t", 0) == 0 ||
+            message.rfind("NMOUNTS\t1\tEND", 0) == 0)
+            return true;
+        native_mounts::Service::Instance().HandleAddonWhisper(player, message);
+        return false;
     }
 };
 

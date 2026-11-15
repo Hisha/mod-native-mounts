@@ -2,6 +2,7 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+  <Script file="NativeMountCatalog.lua" />
   <Script file="NativeMountsFrame.lua" />
   <Frame name="NativeMountsCollectionsFrame" parent="ContentManagerCollectionsFrame" hidden="true" enableMouse="true">
     <Anchors>
@@ -15,11 +16,21 @@
         </Texture>
       </Layer>
       <Layer level="ARTWORK">
-        <FontString inherits="GameFontHighlightSmall" text="PoC catalog: click to preview; drag an available spell to a normal action bar.">
+        <FontString inherits="GameFontHighlightSmall" text="Click to preview; learned mounts can be dragged to a normal action bar.">
           <Anchors><Anchor point="BOTTOMLEFT"><Offset x="18" y="18" /></Anchor></Anchors>
         </FontString>
         <FontString name="NativeMountsSelectedName" inherits="GameFontNormalLarge">
           <Anchors><Anchor point="TOP" relativePoint="TOP"><Offset x="180" y="-22" /></Anchor></Anchors>
+        </FontString>
+        <FontString name="NativeMountsCount" inherits="GameFontHighlightSmall">
+          <Anchors><Anchor point="BOTTOMLEFT"><Offset x="18" y="38" /></Anchor></Anchors>
+        </FontString>
+        <FontString name="NativeMountsRestriction" inherits="GameFontHighlightSmall" justifyH="CENTER">
+          <Size x="300" y="48" />
+          <Anchors><Anchor point="BOTTOMRIGHT"><Offset x="-22" y="28" /></Anchor></Anchors>
+        </FontString>
+        <FontString name="NativeMountsPreviewUnavailable" inherits="GameFontDisable" text="Preview unavailable">
+          <Anchors><Anchor point="CENTER" relativeTo="NativeMountsPreview" /></Anchors>
         </FontString>
       </Layer>
     </Layers>

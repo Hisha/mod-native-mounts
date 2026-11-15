@@ -30,7 +30,7 @@ CharacterEligibility EligibleBase()
 
 int main()
 {
-    Expect(PocCatalog().size() == 5, "PoC catalog remains intentionally bounded");
+    Expect(Catalog().size() > 200, "generated catalog contains the complete stock collection");
 
     CharacterEligibility state = EligibleBase();
     Expect(Evaluate(*FindBySpell(58983), state) == EligibilityFailure::None,
@@ -67,20 +67,20 @@ int main()
     Expect(Evaluate(*FindBySpell(32243), state) == EligibilityFailure::None,
         "Horde race can receive Tawny Wind Rider");
 
-    Expect(FindByLevelTransition(69, 70).size() == 2,
-        "level threshold reconciliation selects only the two level-70 mounts");
-    Expect(FindByLevelTransition(70, 69).size() == 2,
+    Expect(FindByLevelTransition(69, 70).size() >= 2,
+        "level threshold reconciliation includes the level-70 regression mounts");
+    Expect(FindByLevelTransition(70, 69).size() >= 2,
         "level decreases cross the same targeted thresholds");
     Expect(FindByLevelTransition(71, 72).empty(),
         "unrelated level changes produce no reconciliation work");
-    Expect(FindByRidingTransition(299, 300).size() == 2,
-        "riding 300 selects only mounts gated at that rank");
-    Expect(FindByRidingTransition(300, 299).size() == 2,
+    Expect(FindByRidingTransition(299, 300).size() >= 2,
+        "riding 300 includes the regression mounts gated at that rank");
+    Expect(FindByRidingTransition(300, 299).size() >= 2,
         "riding decreases select affected mounts");
-    Expect(FindByProfessionTransition(202, 374, 375).size() == 1,
-        "Engineering 375 selects only Turbo Flying Machine");
-    Expect(FindByProfessionTransition(202, 375, 0).size() == 1,
-        "unlearning Engineering selects only Turbo Flying Machine");
+    Expect(!FindByProfessionTransition(202, 374, 375).empty(),
+        "Engineering 375 includes Turbo Flying Machine");
+    Expect(!FindByProfessionTransition(202, 375, 0).empty(),
+        "unlearning Engineering includes Turbo Flying Machine");
     Expect(FindByProfessionTransition(197, 374, 375).empty(),
         "unrelated professions produce no reconciliation work");
 

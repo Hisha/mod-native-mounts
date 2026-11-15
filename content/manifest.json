@@ -1,10 +1,15 @@
 {
   "schema": 3,
   "package": "mod-native-mounts",
-  "name": "Native Mounts PoC",
-  "version": "0.1.1-account-grant-poc",
-  "description": "Isolated build-12340 Collections page proving native mount-spell dragging and creature preview.",
+  "name": "Native Mounts",
+  "version": "1.0.0-generated-catalog",
+  "description": "Generated build-12340 account-wide native mount collection.",
   "content": [
+    {
+      "type": "file",
+      "source": "client/Interface/FrameXML/NativeMountCatalog.lua",
+      "target": "Interface/FrameXML/NativeMountCatalog.lua"
+    },
     {
       "type": "file",
       "source": "client/Interface/FrameXML/NativeMountsFrame.xml",
@@ -30,7 +35,7 @@
     {
       "id": "mounts",
       "name": "Mounts",
-      "title": "Mounts (Proof of Concept)",
+      "title": "Mounts",
       "order": 200,
       "width": 704,
       "height": 616,
