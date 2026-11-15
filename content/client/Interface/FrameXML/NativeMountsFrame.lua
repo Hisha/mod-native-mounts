@@ -11,28 +11,21 @@ local POC_MOUNTS = {
 
 local buttons = {}
 
-local function spellBookSlot(spellID)
- local wanted = GetSpellInfo(spellID)
- if not wanted then return nil end
- local tabs = GetNumSpellTabs()
- for tab = 1, tabs do
-  local _, _, offset, count = GetSpellTabInfo(tab)
-  for slot = offset + 1, offset + count do
-   local name = GetSpellName(slot, BOOKTYPE_SPELL)
-   if name == wanted then
-    local link = GetSpellLink(slot, BOOKTYPE_SPELL)
-    local linkedID = link and tonumber(string.match(link, "spell:(%d+)"))
-    if not linkedID or linkedID == spellID then return slot end
-   end
-  end
+local function mountCompanionSlot(spellID)
+ for slot = 1, GetNumCompanions("MOUNT") do
+  -- Build 12340 keeps learned mounts in the companion spellbook. Its third
+  -- return is the real mount spell ID; the companion slot is only an unstable
+  -- index into the native Mounts window.
+  local _, _, companionSpellID = GetCompanionInfo("MOUNT", slot)
+  if companionSpellID == spellID then return slot end
  end
  return nil
 end
 
 local function refreshButton(button)
  local entry = button.mount
- local slot = spellBookSlot(entry.spell)
- button.spellBookSlot = slot
+ local slot = mountCompanionSlot(entry.spell)
+ button.companionSlot = slot
  local name, _, icon = GetSpellInfo(entry.spell)
  button.icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
  button.name:SetText(name or entry.label)
@@ -48,10 +41,16 @@ local function refreshButton(button)
 end
 
 function NativeMounts_Row_OnDragStart(button)
- if not button.spellBookSlot then return end
- -- Build 12340 uses the pre-4.0 spellbook-slot signature. The resulting cursor
- -- payload is a native spell action, not a module-owned action-bar surrogate.
- PickupSpell(button.spellBookSlot, BOOKTYPE_SPELL)
+ -- Companion indices can be reordered, so resolve the exact spell again at
+ -- drag time instead of trusting the slot captured by the last refresh.
+ local slot = mountCompanionSlot(button.mount.spell)
+ if not slot then
+  button.companionSlot = nil
+  refreshButton(button)
+  return
+ end
+ button.companionSlot = slot
+ PickupCompanion("MOUNT", slot)
 end
 
 function NativeMounts_Row_OnClick(button)
@@ -70,6 +69,9 @@ end
 
 function NativeMounts_OnLoad(frame)
  frame:RegisterEvent("SPELLS_CHANGED")
+ frame:RegisterEvent("COMPANION_LEARNED")
+ frame:RegisterEvent("COMPANION_UNLEARNED")
+ frame:RegisterEvent("COMPANION_UPDATE")
  frame:SetScript("OnEvent", function(self)
   if self:IsShown() then
    for _, button in ipairs(buttons) do refreshButton(button) end

@@ -2,7 +2,7 @@
   "schema": 3,
   "package": "mod-native-mounts",
   "name": "Native Mounts PoC",
-  "version": "0.1.0-account-grant-poc",
+  "version": "0.1.1-account-grant-poc",
   "description": "Isolated build-12340 Collections page proving native mount-spell dragging and creature preview.",
   "content": [
     {

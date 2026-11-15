@@ -24,13 +24,41 @@ class PocContracts(unittest.TestCase):
 
     def test_drag_payload_is_native_spellbook_action(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        self.assertIn("PickupSpell(button.spellBookSlot, BOOKTYPE_SPELL)", lua)
+        self.assertIn('PickupCompanion("MOUNT", slot)', lua)
+        self.assertIn("local slot = mountCompanionSlot(button.mount.spell)", lua)
         self.assertNotIn("PlaceAction", lua)
+        self.assertNotIn("PickupSpell", lua)
+
+    def test_spellbook_resolution_uses_exact_spell_ids(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        resolver = lua[lua.index("local function mountCompanionSlot"):lua.index("local function refreshButton")]
+        self.assertIn('GetNumCompanions("MOUNT")', resolver)
+        self.assertIn('GetCompanionInfo("MOUNT", slot)', resolver)
+        self.assertIn("companionSpellID == spellID", resolver)
+        self.assertNotIn("GetSpellName", resolver)
+        self.assertNotIn("GetSpellLink", resolver)
+        self.assertNotIn("GetSpellInfo", resolver)
+
+    def test_companion_slot_is_resolved_before_native_pickup(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertIn("local slot = mountCompanionSlot(entry.spell)", lua)
+        self.assertIn("button.companionSlot = slot", lua)
+        self.assertLess(lua.index("button.companionSlot = slot"),
+                        lua.index('PickupCompanion("MOUNT", slot)'))
 
     def test_restricted_fixtures_are_present(self):
         catalog = (ROOT / "src/NativeMountCatalog.cpp").read_text()
         for spell in (58983, 59567, 23161, 44151, 32243):
             self.assertRegex(catalog, rf"\b{spell}\b")
+
+    def test_client_catalog_uses_server_spell_ids(self):
+        catalog = (ROOT / "src/NativeMountCatalog.cpp").read_text()
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        server_ids = {int(value) for value in re.findall(
+            r'\{\s*"[^"]+",\s*(\d+),', catalog)}
+        client_ids = {int(value) for value in re.findall(r'\{\s*spell=(\d+),', lua)}
+        self.assertEqual(client_ids, server_ids)
+        self.assertIn(58983, client_ids)
 
     def test_only_ledger_rows_are_removed(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
@@ -80,6 +108,18 @@ class PocContracts(unittest.TestCase):
     def test_collections_refreshes_on_spell_events(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         self.assertIn('RegisterEvent("SPELLS_CHANGED")', lua)
+        self.assertIn('RegisterEvent("COMPANION_LEARNED")', lua)
+        self.assertIn('RegisterEvent("COMPANION_UNLEARNED")', lua)
+        self.assertIn('RegisterEvent("COMPANION_UPDATE")', lua)
+        event_handler = lua[lua.index('frame:SetScript("OnEvent"'):lua.index("for index, entry")]
+        self.assertIn("for _, button in ipairs(buttons) do refreshButton(button) end", event_handler)
+        self.assertNotIn("SendAddonMessage", event_handler)
+
+    def test_client_has_no_periodic_refresh_or_server_query(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertNotIn('SetScript("OnUpdate"', lua)
+        self.assertNotIn("C_Timer", lua)
+        self.assertNotIn("SendAddonMessage", lua)
 
 
 if __name__ == "__main__":
