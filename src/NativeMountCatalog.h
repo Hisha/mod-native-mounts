@@ -22,6 +22,10 @@ struct MountVariant
 std::vector<MountVariant> const& PocCatalog();
 MountVariant const* FindBySpell(std::uint32_t spellId);
 std::vector<MountVariant const*> FindByKey(std::string_view key);
+std::vector<MountVariant const*> FindByLevelTransition(std::uint8_t oldLevel, std::uint8_t newLevel);
+std::vector<MountVariant const*> FindByRidingTransition(std::uint16_t oldValue, std::uint16_t newValue);
+std::vector<MountVariant const*> FindByProfessionTransition(
+    std::uint16_t skillId, std::uint16_t oldValue, std::uint16_t newValue);
 }
 
 #endif

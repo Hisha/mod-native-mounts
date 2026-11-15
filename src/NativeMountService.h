@@ -3,10 +3,14 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 class Player;
+
+namespace native_mounts { struct MountVariant; }
 
 namespace native_mounts
 {
@@ -14,7 +18,6 @@ struct ServiceConfig
 {
     bool enabled = false;
     bool revokeIneligibleModuleGrants = true;
-    std::uint32_t reconcileIntervalMs = 5000;
 };
 
 class Service
@@ -24,24 +27,28 @@ public:
     void Configure(ServiceConfig const& config);
     bool Initialize();
     bool IsEnabled() const;
-    void Reconcile(Player* player);
-    void Update(Player* player, std::uint32_t diff);
+    void ReconcileLogin(Player* player);
+    void HandleLevelChange(Player* player, std::uint8_t oldLevel);
+    void HandleSkillChange(Player* player, std::uint32_t skillId,
+        std::uint32_t oldValue, std::uint32_t newValue);
     void HandleLearn(Player* player, std::uint32_t spellId);
     void HandleForget(Player* player, std::uint32_t spellId);
     void Release(Player* player);
+    bool SetAccountOwnership(std::uint32_t accountId, std::string_view mountKey, bool owned);
 
 private:
     Service() = default;
     std::uint64_t OperationKey(Player const* player, std::uint32_t spellId) const;
-    bool IsModuleGrant(std::uint32_t guid, std::uint32_t spellId) const;
-    void RecordOwnership(Player* player, char const* mountKey, std::uint32_t spellId, std::uint8_t source);
+    void Reconcile(Player* player, std::vector<MountVariant const*> const& variants, bool importKnownSpells);
+    void ReconcileAccountKey(std::uint32_t accountId, std::string_view mountKey);
+    void Register(Player* player);
 
     mutable std::mutex _mutex;
     ServiceConfig _config;
     bool _databaseAvailable = false;
     std::unordered_set<std::uint64_t> _granting;
     std::unordered_set<std::uint64_t> _revoking;
-    std::unordered_map<std::uint32_t, std::uint32_t> _elapsed;
+    std::unordered_map<std::uint32_t, std::unordered_set<std::uint32_t>> _onlineByAccount;
 };
 }
 

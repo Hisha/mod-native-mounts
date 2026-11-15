@@ -69,6 +69,12 @@ function NativeMounts_Row_OnEnter(button)
 end
 
 function NativeMounts_OnLoad(frame)
+ frame:RegisterEvent("SPELLS_CHANGED")
+ frame:SetScript("OnEvent", function(self)
+  if self:IsShown() then
+   for _, button in ipairs(buttons) do refreshButton(button) end
+  end
+ end)
  for index, entry in ipairs(POC_MOUNTS) do
   local button = CreateFrame("Button", "NativeMountsPocRow" .. index, frame)
   button:SetWidth(330); button:SetHeight(54)

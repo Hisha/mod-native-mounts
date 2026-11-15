@@ -25,4 +25,14 @@ EligibilityFailure Evaluate(MountVariant const& variant, CharacterEligibility co
         return EligibilityFailure::Profession;
     return EligibilityFailure::None;
 }
+
+ReconcileAction DecideReconcileAction(bool accountOwns, bool eligible, bool hasSpell,
+    bool externallySuppressed, bool moduleGrant, bool revokeIneligibleModuleGrants)
+{
+    if (accountOwns && eligible && !externallySuppressed && !hasSpell)
+        return ReconcileAction::Grant;
+    if ((!accountOwns || !eligible) && hasSpell && moduleGrant && revokeIneligibleModuleGrants)
+        return ReconcileAction::Revoke;
+    return ReconcileAction::None;
+}
 }

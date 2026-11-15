@@ -5,9 +5,6 @@
 # the five-entry catalog has been exercised on a PTR.
 NativeMounts.Poc.Enable = 0
 
-# Re-check mutable level, riding, profession, race, and faction eligibility.
-NativeMounts.Poc.ReconcileIntervalMs = 5000
-
 # Remove only a spell whose active ledger row still says it was introduced by
 # this module. Disable for a grant-only diagnostic run.
 NativeMounts.Poc.RevokeIneligibleModuleGrants = 1

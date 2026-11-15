@@ -124,11 +124,16 @@ transition. This is an unresolved limitation, not silently treated as solved.
 
 - Login reconciliation handles offline level, race/faction, class, riding, and
   profession changes.
-- `OnPlayerLevelChanged` handles normal level progression promptly.
-- A bounded periodic online reconciliation detects skill/profession changes and
-  account changes, including another online character collecting a mount.
-- Production should replace per-character polling queries with per-account cache
-  generations plus targeted invalidation if concurrency warrants it.
+- `OnPlayerLevelChanged` handles increases and decreases and selects only catalog
+  entries whose level threshold was crossed.
+- `OnPlayerUpdateSkill` handles successful riding/profession gains;
+  `OnPlayerSetSkill` handles direct increases, decreases, additions, and
+  unlearning. Both select only crossed catalog thresholds.
+- `OnPlayerLearnSpell` publishes newly inserted ownership to the module's online
+  same-account character registry and reconciles only that logical mount key.
+- Administrative ownership commands publish the same targeted invalidation.
+- There is no player-update hook, timer, periodic database query, or idle
+  reconciliation path.
 
 Grant revocation sends the stock unlearn packet. Core does not eagerly delete an
 existing action row at `removeSpell`; on the next login, action validation rejects
@@ -253,7 +258,7 @@ Implemented:
 - five-entry reviewed catalog: Big Blizzard Bear `58983`, Azure Drake `59567`,
   Dreadsteed `23161`, Turbo Flying Machine `44151`, Tawny Wind Rider `32243`;
 - account ownership import on learn and login;
-- eligible login/periodic grants through `Player::learnSpell`;
+- eligible login and event-driven grants through `Player::learnSpell`;
 - module-only revoke through `Player::removeSpell`;
 - provenance ledger and external-unlearn suppression;
 - independent `mounts` Collections registration;
@@ -262,7 +267,7 @@ Implemented:
 
 Automated results:
 
-- six Python contract tests pass;
+- ten Python contract tests pass;
 - standalone C++ eligibility matrix passes with warnings-as-errors;
 - all five AzerothCore module translation units compile against revision
   `32fd3472aa74961c91cb9bc942ee3e0a44b36779`;
@@ -293,8 +298,8 @@ Use a disposable PTR character database only.
    already-mounted state.
 6. Prove Dreadsteed is granted to an eligible Warlock but not a Paladin; Tawny
    Wind Rider to an allowed Horde race but not an Alliance race; Turbo only at
-   Engineering 375/riding 300/level 70. Lower Engineering to 1 and observe both
-   periodic revoke and action-bar behavior.
+   Engineering 375/riding 300/level 70. Lower Engineering to 1 and observe the
+   immediate event-driven revoke and action-bar behavior.
 7. Independently learn one fixture on B before account reconciliation. Confirm
    ownership import occurs, no removable module row is created, and later
    eligibility/account changes do not remove the spell.
@@ -325,8 +330,9 @@ Use a disposable PTR character database only.
 9. Faction-equivalent mappings beyond the five PoC fixtures are not implemented.
 10. Safe replacement of the legacy mount UI needs a separate FrameXML audit.
 11. Model scale/position presets and unseen-model behavior need live client work.
-12. The PoC polling/query strategy is intentionally simple and is not the final
-    high-concurrency cache design.
+12. Direct SQL edits made outside the module's administrative API cannot emit an
+    online invalidation event. Use the supplied commands; offline characters
+    still reconcile on login.
 
 ## 12. Go/no-go gate
 

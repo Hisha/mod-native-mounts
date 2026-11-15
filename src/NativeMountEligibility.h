@@ -28,6 +28,16 @@ enum class EligibilityFailure : std::uint8_t
 };
 
 EligibilityFailure Evaluate(MountVariant const& variant, CharacterEligibility const& character);
+
+enum class ReconcileAction : std::uint8_t
+{
+    None,
+    Grant,
+    Revoke
+};
+
+ReconcileAction DecideReconcileAction(bool accountOwns, bool eligible, bool hasSpell,
+    bool externallySuppressed, bool moduleGrant, bool revokeIneligibleModuleGrants);
 }
 
 #endif
