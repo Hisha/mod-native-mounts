@@ -1,10 +1,13 @@
 #include "NativeMountService.h"
 
+#include "AllSpellScript.h"
 #include "Chat.h"
 #include "CommandScript.h"
 #include "Config.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "Spell.h"
+#include "SpellInfo.h"
 
 #include <string>
 #include <utility>
@@ -60,10 +63,45 @@ public:
             return true;
         if (message.rfind("NMOUNTS\t1\tRESET\t", 0) == 0 ||
             message.rfind("NMOUNTS\t1\tOWN\t", 0) == 0 ||
+            message.rfind("NMOUNTS\t1\tABILITY\t", 0) == 0 ||
             message.rfind("NMOUNTS\t1\tEND\t", 0) == 0)
             return true;
         native_mounts::Service::Instance().HandleAddonWhisper(player, message);
         return false;
+    }
+};
+
+class NativeMountRandomSpellScript final : public AllSpellScript
+{
+public:
+    NativeMountRandomSpellScript() : AllSpellScript("NativeMountRandomSpellScript") { }
+
+    void OnSpellCheckCast(Spell* spell, bool strict, SpellCastResult& result) override
+    {
+        if (!spell || !spell->GetSpellInfo() || result != SPELL_CAST_OK ||
+            !native_mounts::Service::Instance().IsRandomMountSpell(spell->GetSpellInfo()->Id))
+            return;
+        Unit* caster = spell->GetCaster()->ToUnit();
+        if (!caster || !caster->IsPlayer())
+        {
+            result = SPELL_FAILED_BAD_TARGETS;
+            return;
+        }
+        result = native_mounts::Service::Instance().PrepareRandomMount(caster->ToPlayer(), strict);
+    }
+
+    void OnSpellCast(Spell*, Unit* caster, SpellInfo const* spellInfo, bool) override
+    {
+        if (caster && caster->IsPlayer() && spellInfo &&
+            native_mounts::Service::Instance().IsRandomMountSpell(spellInfo->Id))
+            native_mounts::Service::Instance().CastPreparedRandomMount(caster->ToPlayer());
+    }
+
+    void OnSpellCastCancel(Spell*, Unit* caster, SpellInfo const* spellInfo, bool) override
+    {
+        if (caster && caster->IsPlayer() && spellInfo &&
+            native_mounts::Service::Instance().IsRandomMountSpell(spellInfo->Id))
+            native_mounts::Service::Instance().CancelPreparedRandomMount(caster->ToPlayer());
     }
 };
 
@@ -112,5 +150,6 @@ void AddNativeMountModuleScripts()
 {
     new NativeMountWorldScript();
     new NativeMountPlayerScript();
+    new NativeMountRandomSpellScript();
     new NativeMountCommandScript();
 }

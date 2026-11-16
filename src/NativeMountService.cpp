@@ -2,13 +2,18 @@
 
 #include "NativeMountCatalog.h"
 #include "NativeMountEligibility.h"
+#include "api/ContentResourceApiV1.h"
 
 #include "DatabaseEnv.h"
 #include "Log.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "Player.h"
+#include "Random.h"
+#include "ScriptMgr.h"
 #include "SharedDefines.h"
+#include "Spell.h"
+#include "SpellMgr.h"
 #include "WorldSession.h"
 #include "WorldPacket.h"
 
@@ -126,7 +131,7 @@ void PrimePreviewCreatureCache(Player* player)
 }
 
 void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned,
-    std::uint32_t requestId)
+    std::uint32_t requestId, std::uint32_t randomMountSpell)
 {
     if (!player)
         return;
@@ -148,7 +153,29 @@ void SendSnapshot(Player* player, std::unordered_set<std::string> const& owned,
     }
     if (payload.size() != prefix.size())
         player->Whisper(payload, LANG_ADDON, player);
+    player->Whisper("NMOUNTS\t1\tABILITY\t" + std::to_string(requestId) + "\t" +
+        std::to_string(randomMountSpell), LANG_ADDON, player);
     player->Whisper("NMOUNTS\t1\tEND\t" + std::to_string(requestId), LANG_ADDON, player);
+}
+
+ContentResourcesV1::Provider const* FindContentProvider(std::string& reason)
+{
+    ContentResourcesV1::Provider const* provider = nullptr;
+    for (auto const& script : ScriptRegistry<WorldScript>::ScriptPointerList)
+    {
+        auto const* candidate = dynamic_cast<ContentResourcesV1::Provider const*>(script.second);
+        if (!candidate)
+            continue;
+        if (provider)
+        {
+            reason = "multiple ContentResourceApiV1 providers are registered";
+            return nullptr;
+        }
+        provider = candidate;
+    }
+    if (!provider)
+        reason = "Content Manager resource provider is not registered";
+    return provider;
 }
 }
 
@@ -171,13 +198,40 @@ bool Service::Initialize()
     QueryResult result = CharacterDatabase.Query(
         "SELECT COUNT(*) FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() "
         "AND `TABLE_NAME` IN ('native_mount_account_ownership','native_mount_character_grant')");
-    std::lock_guard<std::mutex> lock(_mutex);
-    _databaseAvailable = result && result->Fetch()[0].Get<std::uint64_t>() == 2;
-    if (_config.enabled && !_databaseAvailable)
+    bool enabled = false;
+    bool databaseAvailable = false;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _databaseAvailable = result && result->Fetch()[0].Get<std::uint64_t>() == 2;
+        enabled = _config.enabled;
+        databaseAvailable = _databaseAvailable;
+    }
+    if (enabled && !databaseAvailable)
         LOG_ERROR("module.native_mounts", "PoC enabled but native mount ownership/grant tables are missing.");
-    else if (_config.enabled)
+    else if (enabled)
         LOG_INFO("module.native_mounts", "Loaded {} generated mount spell variants at startup.", catalogSize);
-    return _databaseAvailable;
+    if (enabled && databaseAvailable)
+        ResolveRandomMountSpell();
+    return databaseAvailable;
+}
+
+bool Service::ResolveRandomMountSpell()
+{
+    std::string reason;
+    ContentResourcesV1::Provider const* provider = FindContentProvider(reason);
+    std::uint32_t spellId = 0;
+    if (!provider || provider->ResolveResource("mod-native-mounts", "random-mount",
+            "spell.id", spellId, reason) != ContentResourcesV1::Result::Ready || !spellId ||
+        !sSpellMgr->GetSpellInfo(spellId))
+    {
+        LOG_ERROR("module.native_mounts", "Random Mount managed spell is unavailable: {}",
+            reason.empty() ? "resource is not active or SpellInfo requires a worldserver restart" : reason);
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    _randomMountSpell = spellId;
+    LOG_INFO("module.native_mounts", "Resolved Random Mount managed spell {}.", spellId);
+    return true;
 }
 
 bool Service::IsEnabled() const
@@ -331,13 +385,110 @@ void Service::ReconcileCollections(Player* player, std::uint32_t requestId)
         if (value == 1)
             owned.insert(key);
     PrimePreviewCreatureCache(player);
-    SendSnapshot(player, owned, requestId);
+    std::uint32_t randomMountSpell = 0;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        randomMountSpell = _randomMountSpell;
+    }
+    if (randomMountSpell && !player->HasSpell(randomMountSpell))
+        player->learnSpell(randomMountSpell, false);
+    SendSnapshot(player, owned, requestId,
+        randomMountSpell && player->HasSpell(randomMountSpell) ? randomMountSpell : 0);
     auto const elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - started).count();
     LOG_INFO("module.native_mounts",
         "Collections reconciliation account={} character={} request={} db_reads=1 sync_writes={} grants={} revokes={} imports={} query_us={} world_thread_us={}",
         account, guid, requestId, importedKeys.empty() ? grants : grants + 1,
         grants, revokes, importedKeys.size(), queryElapsed, elapsed);
+}
+
+bool Service::IsRandomMountSpell(std::uint32_t spellId) const
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    return spellId && spellId == _randomMountSpell;
+}
+
+SpellCastResult Service::PrepareRandomMount(Player* player, bool strict)
+{
+    if (!player || !player->GetSession() || !IsEnabled())
+        return SPELL_FAILED_SPELL_UNAVAILABLE;
+    if (!strict)
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_preparedRandomMounts.find(player->GetGUID().GetCounter()) != _preparedRandomMounts.end())
+            return SPELL_CAST_OK;
+    }
+
+    std::vector<MountVariant const*> known;
+    known.reserve(Catalog().size());
+    for (MountVariant const& variant : Catalog())
+        if (player->HasSpell(variant.spellId) &&
+            Evaluate(variant, Snapshot(player, variant)) == EligibilityFailure::None)
+            known.push_back(&variant);
+
+    if (known.empty())
+        return SPELL_FAILED_NOT_KNOWN;
+
+    ReconcileState state = LoadState(player, known);
+    std::vector<std::uint32_t> eligible;
+    std::unordered_set<std::string_view> logicalKeys;
+    eligible.reserve(known.size());
+    for (MountVariant const* variant : known)
+    {
+        auto ownership = state.ownership.find(std::string(variant->key));
+        std::uint8_t const ownershipState = ownership == state.ownership.end() ? 0 : ownership->second;
+        auto grant = state.grants.find(variant->spellId);
+        std::uint8_t const grantState = grant == state.grants.end() ? 0xff : grant->second.state;
+        SpellInfo const* info = sSpellMgr->GetSpellInfo(variant->spellId);
+        bool dynamicallyEligible = false;
+        if (info)
+        {
+            Spell probe(player, info, TRIGGERED_NONE);
+            SpellCastTargets targets;
+            targets.SetUnitTarget(player);
+            probe.InitExplicitTargets(targets);
+            dynamicallyEligible = probe.CheckCast(true) == SPELL_CAST_OK;
+        }
+        if (IsRandomMountCandidate(true, ownershipState, grantState, true, dynamicallyEligible) &&
+            logicalKeys.insert(variant->key).second)
+            eligible.push_back(variant->spellId);
+    }
+
+    if (eligible.empty())
+        return SPELL_FAILED_NOT_HERE;
+    std::uint32_t const selected = eligible[urand(0, eligible.size() - 1)];
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _preparedRandomMounts[player->GetGUID().GetCounter()] = selected;
+    }
+    return SPELL_CAST_OK;
+}
+
+void Service::CastPreparedRandomMount(Player* player)
+{
+    if (!player)
+        return;
+    std::uint32_t spellId = 0;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto const found = _preparedRandomMounts.find(player->GetGUID().GetCounter());
+        if (found == _preparedRandomMounts.end())
+            return;
+        spellId = found->second;
+        _preparedRandomMounts.erase(found);
+    }
+    // The selected public mount is still cast normally. Core cast checks and
+    // the mount's own scripts remain authoritative; no triggered flags bypass
+    // location, movement, combat, water, or flight restrictions.
+    player->CastSpell(player, spellId, false);
+}
+
+void Service::CancelPreparedRandomMount(Player* player)
+{
+    if (!player)
+        return;
+    std::lock_guard<std::mutex> lock(_mutex);
+    _preparedRandomMounts.erase(player->GetGUID().GetCounter());
 }
 
 void Service::HandleLearn(Player* player, std::uint32_t spellId)

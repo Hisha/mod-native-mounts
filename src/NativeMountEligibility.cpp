@@ -35,4 +35,14 @@ ReconcileAction DecideReconcileAction(bool accountOwns, bool eligible, bool hasS
         return ReconcileAction::Revoke;
     return ReconcileAction::None;
 }
+
+bool IsRandomMountCandidate(bool hasSpell, std::uint8_t ownershipState,
+    std::uint8_t grantState, bool staticallyEligible, bool dynamicallyEligible)
+{
+    // Ownership state 2 is an administrative revocation. Grant states 2 and 4
+    // are eligibility-revoked and externally-suppressed tombstones. Missing
+    // state is allowed for an independently learned legacy spell.
+    return hasSpell && ownershipState != 2 && grantState != 2 && grantState != 4 &&
+        staticallyEligible && dynamicallyEligible;
+}
 }

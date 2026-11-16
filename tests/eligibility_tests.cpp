@@ -78,5 +78,18 @@ int main()
     Expect(DecideReconcileAction(false, false, true, false, false, true) == ReconcileAction::None,
         "independently learned spells survive ownership and eligibility loss");
 
+    Expect(IsRandomMountCandidate(true, 1, 1, true, true),
+        "learned owned eligible mount is a random candidate");
+    Expect(IsRandomMountCandidate(true, 0, 0xff, true, true),
+        "independently learned legacy mount is a random candidate");
+    Expect(!IsRandomMountCandidate(true, 2, 1, true, true),
+        "administratively revoked mount is excluded from random selection");
+    Expect(!IsRandomMountCandidate(true, 1, 4, true, true),
+        "externally suppressed mount is excluded from random selection");
+    Expect(!IsRandomMountCandidate(true, 1, 2, true, true),
+        "eligibility-revoked module grant is excluded from random selection");
+    Expect(!IsRandomMountCandidate(true, 1, 1, true, false),
+        "location-restricted mount is excluded from random selection");
+
     std::cout << "native mounts eligibility tests passed\n";
 }

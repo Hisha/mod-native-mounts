@@ -38,6 +38,9 @@ enum class ReconcileAction : std::uint8_t
 
 ReconcileAction DecideReconcileAction(bool accountOwns, bool eligible, bool hasSpell,
     bool externallySuppressed, bool moduleGrant, bool revokeIneligibleModuleGrants);
+
+bool IsRandomMountCandidate(bool hasSpell, std::uint8_t ownershipState,
+    std::uint8_t grantState, bool staticallyEligible, bool dynamicallyEligible);
 }
 
 #endif

@@ -24,10 +24,12 @@ class CatalogContracts(unittest.TestCase):
 
     def test_drag_payload_is_native_spellbook_action(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        self.assertIn('PickupCompanion("MOUNT", slot)', lua)
-        self.assertIn("mountCompanionSlot(button.variant.spell)", lua)
-        self.assertNotIn("PlaceAction", lua)
-        self.assertNotIn("PickupSpell", lua)
+        row_drag = lua[lua.index("function NativeMounts_Row_OnDragStart"):
+                       lua.index("function NativeMounts_Row_OnClick")]
+        self.assertIn('PickupCompanion("MOUNT", slot)', row_drag)
+        self.assertIn("mountCompanionSlot(button.variant.spell)", row_drag)
+        self.assertNotIn("PlaceAction", row_drag)
+        self.assertNotIn("PickupSpell", row_drag)
 
     def test_spellbook_resolution_uses_exact_spell_ids(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
@@ -133,12 +135,12 @@ class CatalogContracts(unittest.TestCase):
     def test_uncollected_preview_primes_creature_cache_and_clears_stale_model(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         service = (ROOT / "src/NativeMountService.cpp").read_text()
-        click = lua[lua.index("function NativeMounts_Row_OnClick"):lua.index("function NativeMounts_Row_OnEnter")]
-        self.assertLess(click.index("ClearModel()"), click.index("SetCreature(variant.creature)"))
+        selection = lua[lua.index("local function selectEntry"):lua.index("local function refreshButton")]
+        self.assertLess(selection.index("ClearModel()"), selection.index("SetCreature(variant.creature)"))
         self.assertIn("PrimePreviewCreatureCache(player)", service)
         self.assertIn("HandleCreatureQueryOpcode(query)", service)
-        self.assertNotIn("learnSpell", click)
-        self.assertNotIn("CastSpell", click)
+        self.assertNotIn("learnSpell", selection)
+        self.assertNotIn("CastSpell", selection)
 
         data = json.loads((ROOT / "generated/mount_catalog.json").read_text())
         fixtures = {row["name"]: row["previewCreature"] for row in data["mounts"]
@@ -162,7 +164,71 @@ class CatalogContracts(unittest.TestCase):
         self.assertIn('RegisterEvent("COMPANION_UNLEARNED")', lua)
         self.assertIn('RegisterEvent("COMPANION_UPDATE")', lua)
         event_handler = lua[lua.index('frame:SetScript("OnEvent"'):lua.index('frame:EnableMouseWheel')]
-        self.assertIn("refreshRows()", event_handler)
+        self.assertIn("rebuildFiltered(false)", event_handler)
+
+    def test_filtering_is_local_logical_and_preserves_selection_contract(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        filtering = lua[lua.index("local function rebuildFiltered"):lua.index("local function setOffset")]
+        self.assertIn('currentFilter == "ALL"', filtering)
+        self.assertIn('currentFilter == "COLLECTED" and owned', filtering)
+        self.assertIn('currentFilter == "UNCOLLECTED" and not owned', filtering)
+        self.assertIn("entry.key == selectedKey", filtering)
+        self.assertIn("clearPreview()", filtering)
+        self.assertNotIn("SendAddonMessage", filtering)
+        self.assertIn("if resetScroll then offset = 0", filtering)
+        self.assertIn("#filteredCatalog - ROWS", filtering)
+
+    def test_counter_classifies_account_owned_logical_entries(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        counter = lua[lua.index("local function updateCount"):lua.index("local function refreshRows")]
+        self.assertIn("for _, entry in ipairs(CATALOG)", counter)
+        self.assertIn("entryOwned(entry)", counter)
+        self.assertIn("%d total  |  %d collected  |  %d uncollected", counter)
+        data = json.loads((ROOT / "generated/mount_catalog.json").read_text())
+        self.assertEqual(data["statistics"]["logicalMounts"], 192)
+
+    def test_random_mount_is_managed_native_spell_action(self):
+        manifest = json.loads((ROOT / "content/manifest.json").read_text())
+        spell = next(row for row in manifest["spells"] if row["symbol"] == "random-mount")
+        self.assertEqual(spell["profile"], "stock-spell-clone-v1")
+        self.assertEqual(spell["copyFrom"], 5407)
+        self.assertEqual(spell["iconCopyFromSpell"], 48025)
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertIn('CreateFrame("Button", "NativeMountsRandomButton", frame, "SecureActionButtonTemplate")', lua)
+        self.assertIn("PickupSpell(slot, BOOKTYPE_SPELL)", lua)
+        self.assertIn('SetAttribute("type", name and "spell" or nil)', lua)
+        self.assertNotIn("CreateMacro", lua)
+        self.assertNotIn("EditMacro", lua)
+
+    def test_random_mount_uses_current_spells_and_normal_cast_checks(self):
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        module = (ROOT / "src/NativeMountModule.cpp").read_text()
+        chooser = service[service.index("SpellCastResult Service::PrepareRandomMount"):
+                          service.index("void Service::CastPreparedRandomMount")]
+        self.assertIn("player->HasSpell(variant.spellId)", chooser)
+        self.assertIn("Evaluate(variant, Snapshot(player, variant))", chooser)
+        self.assertIn("LoadState(player, known)", chooser)
+        self.assertIn("probe.CheckCast(true) == SPELL_CAST_OK", chooser)
+        self.assertIn("logicalKeys.insert(variant->key)", chooser)
+        cast = service[service.index("void Service::CastPreparedRandomMount"):
+                       service.index("void Service::CancelPreparedRandomMount")]
+        self.assertIn("player->CastSpell(player, spellId, false)", cast)
+        self.assertNotIn("learnSpell", chooser + cast)
+        self.assertIn("NativeMountRandomSpellScript", module)
+
+    def test_random_mount_has_no_login_or_polling_path(self):
+        module = (ROOT / "src/NativeMountModule.cpp").read_text()
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertNotIn("PLAYERHOOK_ON_LOGIN", module)
+        self.assertNotIn("OnPlayerLogin", module)
+        self.assertNotIn('SetScript("OnUpdate"', lua)
+
+    def test_collections_icon_switches_only_for_mounts(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', lua)
+        self.assertIn('setCollectionsIcon(true)', lua)
+        self.assertIn('setCollectionsIcon(false)', lua)
+        self.assertIn('Interface\\\\Buttons\\\\ContentManagerCollections', lua)
 
     def test_client_has_no_periodic_refresh_or_server_query(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
@@ -185,7 +251,7 @@ class CatalogContracts(unittest.TestCase):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
         self.assertIn("entryOwned(entry)", lua)
         self.assertIn("native_mount_account_ownership", service)
-        self.assertIn("SendSnapshot(player, owned, requestId)", service)
+        self.assertIn("SendSnapshot(player, owned, requestId,", service)
 
     def test_profession_uses_trained_value(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()

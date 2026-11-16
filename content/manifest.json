@@ -2,7 +2,7 @@
   "schema": 3,
   "package": "mod-native-mounts",
   "name": "Native Mounts",
-  "version": "1.0.0-generated-catalog",
+  "version": "1.1.0-collections-final",
   "description": "Generated build-12340 account-wide native mount collection.",
   "content": [
     {
@@ -31,6 +31,20 @@
       }
     ]
   },
+  "spells": [
+    {
+      "symbol": "random-mount",
+      "copyFrom": 5407,
+      "profile": "stock-spell-clone-v1",
+      "name": {
+        "enUS": "Random Mount"
+      },
+      "description": {
+        "enUS": "Summons a random mount currently available to this character."
+      },
+      "iconCopyFromSpell": 48025
+    }
+  ],
   "nativeCollectionPages": [
     {
       "id": "mounts",

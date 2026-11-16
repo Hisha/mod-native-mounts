@@ -16,7 +16,7 @@
         </Texture>
       </Layer>
       <Layer level="ARTWORK">
-        <FontString inherits="GameFontHighlightSmall" text="Click to preview; learned mounts can be dragged to a normal action bar.">
+        <FontString inherits="GameFontHighlightSmall" text="Click to preview; learned mounts and Random Mount can be dragged to an action bar.">
           <Anchors><Anchor point="BOTTOMLEFT"><Offset x="18" y="18" /></Anchor></Anchors>
         </FontString>
         <FontString name="NativeMountsSelectedName" inherits="GameFontNormalLarge">
