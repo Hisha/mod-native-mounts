@@ -2,7 +2,7 @@
 local PREFIX, VERSION = "NMOUNTS", "1"
 local CATALOG = NATIVE_MOUNT_CATALOG or {}
 local ROWS, ROW_HEIGHT = 9, 54
-local COLLECTIONS_MOUNT_ICON = "Interface\\Minimap\\Tracking\\StableMaster"
+local COLLECTIONS_MOUNT_ICON = "Interface\\Icons\\Ability_Mount_RidingHorse"
 local buttons, ownedSpells, filteredCatalog = {}, {}, {}
 local pendingOwnedSpells
 local offset, ownershipReady, selectedSpell, selectedKey = 0, false, nil, nil

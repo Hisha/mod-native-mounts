@@ -273,9 +273,9 @@ class CatalogContracts(unittest.TestCase):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         icon = lua[lua.index("local function setCollectionsIcon"):
                    lua.index("function NativeMounts_Row_OnDragStart")]
-        self.assertIn('Interface\\\\Minimap\\\\Tracking\\\\StableMaster', lua)
+        self.assertIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', lua)
         self.assertNotIn('Interface\\\\Buttons\\\\UI-Quickslot2', icon)
-        self.assertNotIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', icon)
+        self.assertNotIn('Interface\\\\Minimap\\\\Tracking\\\\StableMaster', icon)
         self.assertIn('setCollectionsIcon(true)', lua)
         self.assertIn('setCollectionsIcon(false)', lua)
         self.assertIn('SetPortraitToTexture(collectionsMountField,', icon)
