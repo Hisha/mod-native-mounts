@@ -192,17 +192,21 @@ class CatalogContracts(unittest.TestCase):
         manifest = json.loads((ROOT / "content/manifest.json").read_text())
         spell = next(row for row in manifest["spells"] if row["symbol"] == "random-mount")
         self.assertEqual(spell["profile"], "stock-spell-clone-v1")
-        self.assertEqual(spell["copyFrom"], 5407)
+        # Build 12340 donor 5409 uses CastingTimeIndex 1 (instant). Donor 5407
+        # uses index 14 and produces the unwanted dispatcher cast bar.
+        self.assertEqual(spell["copyFrom"], 5409)
         self.assertEqual(spell["iconCopyFromSpell"], 48025)
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         self.assertIn('CreateFrame("Button", "NativeMountsRandomButton", frame, "SecureActionButtonTemplate")', lua)
-        self.assertIn("PickupSpellBookItem(slot, BOOKTYPE_SPELL)", lua)
+        self.assertIn("PickupSpell(slot, BOOKTYPE_SPELL)", lua)
         self.assertIn('SetAttribute("type", name and "spell" or nil)', lua)
         self.assertNotIn("CreateMacro", lua)
         self.assertNotIn("EditMacro", lua)
 
     def test_random_mount_spellbook_lookup_uses_build_12340_api(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        self.assertNotIn("PickupSpellBookItem", lua)
+        self.assertNotIn("GetSpellBookItemInfo", lua)
         resolver = lua[lua.index("local function spellBookSlot"):
                        lua.index("local function maskHas")]
         self.assertIn("GetSpellInfo(spellID)", resolver)
@@ -214,8 +218,9 @@ class CatalogContracts(unittest.TestCase):
         drag = lua[lua.index('randomButton:SetScript("OnDragStart"'):
                    lua.index('randomButton:SetScript("OnEnter"')]
         self.assertIn("spellBookSlot(randomMountSpell)", drag)
-        self.assertIn("PickupSpellBookItem(slot, BOOKTYPE_SPELL)", drag)
-        self.assertNotIn("PickupSpell(", drag)
+        self.assertIn("PickupSpell(slot, BOOKTYPE_SPELL)", drag)
+        self.assertNotIn("PickupSpellBookItem", drag)
+        self.assertNotIn("GetSpellBookItemInfo", drag)
 
     def test_random_mount_uses_current_spells_and_normal_cast_checks(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
@@ -232,6 +237,17 @@ class CatalogContracts(unittest.TestCase):
         self.assertIn("player->CastSpell(player, spellId, false)", cast)
         self.assertNotIn("learnSpell", chooser + cast)
         self.assertIn("NativeMountRandomSpellScript", module)
+
+    def test_random_mount_dispatcher_is_instant_but_selected_mount_is_not_triggered(self):
+        manifest = json.loads((ROOT / "content/manifest.json").read_text())
+        spell = next(row for row in manifest["spells"] if row["symbol"] == "random-mount")
+        self.assertEqual(spell["copyFrom"], 5409)
+        self.assertNotEqual(spell["copyFrom"], 5407)
+        service = (ROOT / "src/NativeMountService.cpp").read_text()
+        cast = service[service.index("void Service::CastPreparedRandomMount"):
+                       service.index("void Service::CancelPreparedRandomMount")]
+        self.assertIn("player->CastSpell(player, spellId, false)", cast)
+        self.assertNotIn("player->CastSpell(player, spellId, true)", cast)
 
     def test_random_mount_spell_handler_is_registered_for_cast_paths(self):
         module = (ROOT / "src/NativeMountModule.cpp").read_text()
@@ -257,13 +273,33 @@ class CatalogContracts(unittest.TestCase):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         icon = lua[lua.index("local function setCollectionsIcon"):
                    lua.index("function NativeMounts_Row_OnDragStart")]
-        self.assertIn('Interface\\\\Icons\\\\Spell_Nature_Swiftness', lua)
-        self.assertIn('Interface\\\\Buttons\\\\UI-Quickslot2', icon)
+        self.assertIn('Interface\\\\Minimap\\\\Tracking\\\\StableMaster', lua)
+        self.assertNotIn('Interface\\\\Buttons\\\\UI-Quickslot2', icon)
         self.assertNotIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', icon)
-        self.assertNotIn('Interface\\\\Minimap\\\\MiniMap-TrackingBorder', icon)
         self.assertIn('setCollectionsIcon(true)', lua)
         self.assertIn('setCollectionsIcon(false)', lua)
-        self.assertIn('Interface\\\\Buttons\\\\ContentManagerCollections', icon)
+        self.assertIn('SetPortraitToTexture(collectionsMountField,', icon)
+        self.assertIn('SetPortraitToTexture(collectionsMountIcon, COLLECTIONS_MOUNT_ICON)', icon)
+        self.assertIn('collectionsMountField:Show()', icon)
+        self.assertIn('collectionsMountField:Hide()', icon)
+        self.assertIn('collectionsMountIcon:Show()', icon)
+        self.assertIn('collectionsMountIcon:Hide()', icon)
+        self.assertNotIn('SetAllPoints(iconFrame)', icon)
+
+    def test_random_mount_button_has_one_cropped_icon_and_native_button_states(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        button = lua[lua.index('randomButton = CreateFrame'):
+                     lua.index('randomButton.label =')]
+        self.assertEqual(button.count('randomButton.icon = randomButton:CreateTexture'), 1)
+        self.assertIn('randomButton.icon:SetTexCoord(.07, .93, .07, .93)', button)
+        self.assertIn('randomButton:SetNormalTexture("Interface\\\\Buttons\\\\UI-Quickslot2")', button)
+        self.assertIn('randomButton:SetPushedTexture("Interface\\\\Buttons\\\\UI-Quickslot-Depress")', button)
+        self.assertIn('randomButton:SetHighlightTexture("Interface\\\\Buttons\\\\ButtonHilight-Square", "ADD")', button)
+        self.assertNotIn('randomButton.border', button)
+        configure = lua[lua.index("local function configureRandomButton"):
+                        lua.index("local function setCollectionsIcon")]
+        self.assertIn("randomButton.icon:SetDesaturated(false)", configure)
+        self.assertIn("randomButton.icon:SetDesaturated(true)", configure)
 
     def test_client_has_no_periodic_refresh_or_server_query(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()

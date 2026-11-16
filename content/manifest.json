@@ -34,7 +34,7 @@
   "spells": [
     {
       "symbol": "random-mount",
-      "copyFrom": 5407,
+      "copyFrom": 5409,
       "profile": "stock-spell-clone-v1",
       "name": {
         "enUS": "Random Mount"

@@ -56,7 +56,7 @@ by default and contains five reviewed fixtures rather than a complete catalog.
    checks. The module does not use direct `Unit::Mount` or triggered-ignore
    flags. **Source-verified:** `Spell::CheckCast`, `SpellInfo::CheckLocation`,
    and `spell_gen_mount` paths cited in the original investigation.
-8. Build 12340 FrameXML uses the pre-4.0 spellbook-slot form of `PickupSpell`.
+8. Build 12340 FrameXML uses the pre-4.0 spellbook-slot form of `PickupSpell(slot, BOOKTYPE_SPELL)`.
    The PoC resolves the learned spell's book slot and places that native spell
    payload on the cursor. **Source-supported; PTR-required** for the complete
    drag/drop interaction in the patched client.
@@ -188,7 +188,7 @@ The recommended and implemented PoC path is:
 
 ```text
 account ownership → eligible native learned spell → spellbook slot
-        → Collections Random Mount PickupSpellBookItem(slot, BOOKTYPE_SPELL)
+        → Collections Random Mount PickupSpell(slot, BOOKTYPE_SPELL)
         → ordinary ACTION_BUTTON_SPELL → normal cast validation
 ```
 

@@ -2,13 +2,13 @@
 local PREFIX, VERSION = "NMOUNTS", "1"
 local CATALOG = NATIVE_MOUNT_CATALOG or {}
 local ROWS, ROW_HEIGHT = 9, 54
-local COLLECTIONS_ICON = "Interface\\Icons\\Spell_Nature_Swiftness"
+local COLLECTIONS_MOUNT_ICON = "Interface\\Minimap\\Tracking\\StableMaster"
 local buttons, ownedSpells, filteredCatalog = {}, {}, {}
 local pendingOwnedSpells
 local offset, ownershipReady, selectedSpell, selectedKey = 0, false, nil, nil
 local currentFilter, randomMountSpell = "ALL", nil
 local nextRequestId, activeRequestId = 0, 0
-local randomButton, filterDropDown, collectionsIconArt, collectionsIconBorder
+local randomButton, filterDropDown, collectionsMountField, collectionsMountIcon
 local raceIds = {Human=1,Orc=2,Dwarf=3,NightElf=4,Scourge=5,Tauren=6,Gnome=7,Troll=8,BloodElf=10,Draenei=11}
 
 local function mountCompanionSlot(spellID)
@@ -161,7 +161,11 @@ local function configureRandomButton()
  local name, _, icon = randomMountSpell and GetSpellInfo(randomMountSpell)
  randomButton.icon:SetTexture(icon or "Interface\\Icons\\Ability_Mount_RidingHorse")
  randomButton.spellName = name
- if name and spellBookSlot(randomMountSpell) then randomButton:Enable() else randomButton:Disable() end
+ if name and spellBookSlot(randomMountSpell) then
+  randomButton:Enable(); randomButton.icon:SetDesaturated(false); randomButton.icon:SetAlpha(1)
+ else
+  randomButton:Disable(); randomButton.icon:SetDesaturated(true); randomButton.icon:SetAlpha(.5)
+ end
  if not InCombatLockdown() then
   randomButton:SetAttribute("type", name and "spell" or nil); randomButton:SetAttribute("spell", name)
  end
@@ -170,30 +174,19 @@ end
 local function setCollectionsIcon(mountsActive)
  local iconFrame = ContentManagerCollectionsFrame and ContentManagerCollectionsFrame.CollectionsIcon
  if not iconFrame then return end
- if not collectionsIconArt then
-  for index = 1, select("#", iconFrame:GetRegions()) do
-   local region = select(index, iconFrame:GetRegions())
-   if region and region.SetTexture then collectionsIconArt = region; break end
-  end
+ if not collectionsMountIcon then
+  collectionsMountField = iconFrame:CreateTexture(nil, "OVERLAY")
+  SetPortraitToTexture(collectionsMountField, "Interface\\DialogFrame\\UI-DialogBox-Background-Dark")
+  collectionsMountField:SetVertexColor(.35, .12, .5)
+  collectionsMountField:SetWidth(42); collectionsMountField:SetHeight(42)
+  collectionsMountField:SetPoint("CENTER", iconFrame, "CENTER", 0, -1)
+  collectionsMountIcon = iconFrame:CreateTexture(nil, "OVERLAY")
+  SetPortraitToTexture(collectionsMountIcon, COLLECTIONS_MOUNT_ICON)
+  collectionsMountIcon:SetWidth(34); collectionsMountIcon:SetHeight(34)
+  collectionsMountIcon:SetPoint("CENTER", iconFrame, "CENTER", 0, -1)
  end
- if not collectionsIconArt then return end
- if mountsActive then
-  collectionsIconArt:ClearAllPoints(); collectionsIconArt:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
-  collectionsIconArt:SetWidth(52); collectionsIconArt:SetHeight(52)
-  collectionsIconArt:SetTexCoord(.07, .93, .07, .93); collectionsIconArt:SetTexture(COLLECTIONS_ICON)
-  if not collectionsIconBorder then
-   collectionsIconBorder = iconFrame:CreateTexture(nil, "OVERLAY")
-   collectionsIconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-   collectionsIconBorder:SetWidth(58); collectionsIconBorder:SetHeight(58)
-   collectionsIconBorder:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
-  end
-  collectionsIconBorder:Show()
- else
-  collectionsIconArt:ClearAllPoints(); collectionsIconArt:SetAllPoints(iconFrame)
-  collectionsIconArt:SetTexCoord(0, 1, 0, 1)
-  collectionsIconArt:SetTexture("Interface\\Buttons\\ContentManagerCollections")
-  if collectionsIconBorder then collectionsIconBorder:Hide() end
- end
+ if mountsActive then collectionsMountField:Show(); collectionsMountIcon:Show()
+ else collectionsMountField:Hide(); collectionsMountIcon:Hide() end
 end
 
 function NativeMounts_Row_OnDragStart(button)
@@ -284,12 +277,18 @@ function NativeMounts_OnLoad(frame)
  randomButton = CreateFrame("Button", "NativeMountsRandomButton", frame, "SecureActionButtonTemplate")
  randomButton:SetWidth(44); randomButton:SetHeight(44); randomButton:SetPoint("BOTTOMRIGHT", -148, 92)
  randomButton:RegisterForClicks("LeftButtonUp"); randomButton:RegisterForDrag("LeftButton")
- randomButton.icon = randomButton:CreateTexture(nil, "ARTWORK"); randomButton.icon:SetAllPoints(randomButton)
- randomButton.border = randomButton:CreateTexture(nil, "OVERLAY"); randomButton.border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
- randomButton.border:SetPoint("TOPLEFT", -1, 1); randomButton.border:SetPoint("BOTTOMRIGHT", 1, -1)
+ randomButton.icon = randomButton:CreateTexture(nil, "ARTWORK")
+ randomButton.icon:SetWidth(36); randomButton.icon:SetHeight(36)
+ randomButton.icon:SetPoint("CENTER", randomButton, "CENTER", 0, 0)
+ randomButton.icon:SetTexCoord(.07, .93, .07, .93)
+ randomButton:SetNormalTexture("Interface\\Buttons\\UI-Quickslot2")
+ local normalTexture = randomButton:GetNormalTexture()
+ normalTexture:ClearAllPoints(); normalTexture:SetWidth(66); normalTexture:SetHeight(66)
+ normalTexture:SetPoint("CENTER", randomButton, "CENTER", 0, -1)
+ randomButton:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
  randomButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
  randomButton:SetScript("OnDragStart", function()
-  local slot = spellBookSlot(randomMountSpell); if slot then PickupSpellBookItem(slot, BOOKTYPE_SPELL) end
+  local slot = spellBookSlot(randomMountSpell); if slot then PickupSpell(slot, BOOKTYPE_SPELL) end
  end)
  randomButton:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
