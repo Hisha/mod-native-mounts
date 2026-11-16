@@ -33,7 +33,8 @@ class CatalogContracts(unittest.TestCase):
 
     def test_spellbook_resolution_uses_exact_spell_ids(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        resolver = lua[lua.index("local function mountCompanionSlot"):lua.index("local function refreshButton")]
+        resolver = lua[lua.index("local function mountCompanionSlot"):
+                       lua.index("local function spellBookSlot")]
         self.assertIn('GetNumCompanions("MOUNT")', resolver)
         self.assertIn('GetCompanionInfo("MOUNT", slot)', resolver)
         self.assertIn("companionSpellID == spellID", resolver)
@@ -195,10 +196,26 @@ class CatalogContracts(unittest.TestCase):
         self.assertEqual(spell["iconCopyFromSpell"], 48025)
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
         self.assertIn('CreateFrame("Button", "NativeMountsRandomButton", frame, "SecureActionButtonTemplate")', lua)
-        self.assertIn("PickupSpell(slot, BOOKTYPE_SPELL)", lua)
+        self.assertIn("PickupSpellBookItem(slot, BOOKTYPE_SPELL)", lua)
         self.assertIn('SetAttribute("type", name and "spell" or nil)', lua)
         self.assertNotIn("CreateMacro", lua)
         self.assertNotIn("EditMacro", lua)
+
+    def test_random_mount_spellbook_lookup_uses_build_12340_api(self):
+        lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
+        resolver = lua[lua.index("local function spellBookSlot"):
+                       lua.index("local function maskHas")]
+        self.assertIn("GetSpellInfo(spellID)", resolver)
+        self.assertIn("GetSpellTabInfo(tab)", resolver)
+        self.assertIn("for slot = offset + 1, offset + count do", resolver)
+        self.assertIn("GetSpellName(slot, BOOKTYPE_SPELL)", resolver)
+        self.assertNotIn("GetSpellBookItemInfo", resolver)
+
+        drag = lua[lua.index('randomButton:SetScript("OnDragStart"'):
+                   lua.index('randomButton:SetScript("OnEnter"')]
+        self.assertIn("spellBookSlot(randomMountSpell)", drag)
+        self.assertIn("PickupSpellBookItem(slot, BOOKTYPE_SPELL)", drag)
+        self.assertNotIn("PickupSpell(", drag)
 
     def test_random_mount_uses_current_spells_and_normal_cast_checks(self):
         service = (ROOT / "src/NativeMountService.cpp").read_text()
@@ -216,6 +233,19 @@ class CatalogContracts(unittest.TestCase):
         self.assertNotIn("learnSpell", chooser + cast)
         self.assertIn("NativeMountRandomSpellScript", module)
 
+    def test_random_mount_spell_handler_is_registered_for_cast_paths(self):
+        module = (ROOT / "src/NativeMountModule.cpp").read_text()
+        script = module[module.index("class NativeMountRandomSpellScript"):
+                        module.index("class NativeMountCommandScript")]
+        registration = module[module.index("void AddNativeMountModuleScripts") :]
+        self.assertIn("OnSpellCheckCast", script)
+        self.assertIn("PrepareRandomMount", script)
+        self.assertIn("OnSpellCast", script)
+        self.assertIn("CastPreparedRandomMount", script)
+        self.assertIn("OnSpellCastCancel", script)
+        self.assertIn("CancelPreparedRandomMount", script)
+        self.assertIn("new NativeMountRandomSpellScript();", registration)
+
     def test_random_mount_has_no_login_or_polling_path(self):
         module = (ROOT / "src/NativeMountModule.cpp").read_text()
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
@@ -225,10 +255,15 @@ class CatalogContracts(unittest.TestCase):
 
     def test_collections_icon_switches_only_for_mounts(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()
-        self.assertIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', lua)
+        icon = lua[lua.index("local function setCollectionsIcon"):
+                   lua.index("function NativeMounts_Row_OnDragStart")]
+        self.assertIn('Interface\\\\Icons\\\\Spell_Nature_Swiftness', lua)
+        self.assertIn('Interface\\\\Buttons\\\\UI-Quickslot2', icon)
+        self.assertNotIn('Interface\\\\Icons\\\\Ability_Mount_RidingHorse', icon)
+        self.assertNotIn('Interface\\\\Minimap\\\\MiniMap-TrackingBorder', icon)
         self.assertIn('setCollectionsIcon(true)', lua)
         self.assertIn('setCollectionsIcon(false)', lua)
-        self.assertIn('Interface\\\\Buttons\\\\ContentManagerCollections', lua)
+        self.assertIn('Interface\\\\Buttons\\\\ContentManagerCollections', icon)
 
     def test_client_has_no_periodic_refresh_or_server_query(self):
         lua = (ROOT / "content/client/Interface/FrameXML/NativeMountsFrame.lua").read_text()

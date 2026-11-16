@@ -188,7 +188,7 @@ The recommended and implemented PoC path is:
 
 ```text
 account ownership → eligible native learned spell → spellbook slot
-        → Collections row PickupSpell(slot, BOOKTYPE_SPELL)
+        → Collections Random Mount PickupSpellBookItem(slot, BOOKTYPE_SPELL)
         → ordinary ACTION_BUTTON_SPELL → normal cast validation
 ```
 

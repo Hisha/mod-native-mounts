@@ -2,7 +2,7 @@
 local PREFIX, VERSION = "NMOUNTS", "1"
 local CATALOG = NATIVE_MOUNT_CATALOG or {}
 local ROWS, ROW_HEIGHT = 9, 54
-local COLLECTIONS_ICON = "Interface\\Icons\\Ability_Mount_RidingHorse"
+local COLLECTIONS_ICON = "Interface\\Icons\\Spell_Nature_Swiftness"
 local buttons, ownedSpells, filteredCatalog = {}, {}, {}
 local pendingOwnedSpells
 local offset, ownershipReady, selectedSpell, selectedKey = 0, false, nil, nil
@@ -21,11 +21,13 @@ end
 
 local function spellBookSlot(spellID)
  if not spellID then return nil end
+ local targetName = GetSpellInfo(spellID)
+ if not targetName then return nil end
  for tab = 1, GetNumSpellTabs() do
-  local _, _, first, count = GetSpellTabInfo(tab)
-  for slot = first + 1, first + count do
-   local kind, id = GetSpellBookItemInfo(slot, BOOKTYPE_SPELL)
-   if kind == "SPELL" and id == spellID then return slot end
+  local _, _, offset, count = GetSpellTabInfo(tab)
+  for slot = offset + 1, offset + count do
+   local name = GetSpellName(slot, BOOKTYPE_SPELL)
+   if name == targetName then return slot end
   end
  end
  return nil
@@ -181,9 +183,9 @@ local function setCollectionsIcon(mountsActive)
   collectionsIconArt:SetTexCoord(.07, .93, .07, .93); collectionsIconArt:SetTexture(COLLECTIONS_ICON)
   if not collectionsIconBorder then
    collectionsIconBorder = iconFrame:CreateTexture(nil, "OVERLAY")
-   collectionsIconBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-   collectionsIconBorder:SetWidth(90); collectionsIconBorder:SetHeight(90)
-   collectionsIconBorder:SetPoint("CENTER", iconFrame, "CENTER", 10, -10)
+   collectionsIconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+   collectionsIconBorder:SetWidth(58); collectionsIconBorder:SetHeight(58)
+   collectionsIconBorder:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
   end
   collectionsIconBorder:Show()
  else
@@ -287,7 +289,7 @@ function NativeMounts_OnLoad(frame)
  randomButton.border:SetPoint("TOPLEFT", -1, 1); randomButton.border:SetPoint("BOTTOMRIGHT", 1, -1)
  randomButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
  randomButton:SetScript("OnDragStart", function()
-  local slot = spellBookSlot(randomMountSpell); if slot then PickupSpell(slot, BOOKTYPE_SPELL) end
+  local slot = spellBookSlot(randomMountSpell); if slot then PickupSpellBookItem(slot, BOOKTYPE_SPELL) end
  end)
  randomButton:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
